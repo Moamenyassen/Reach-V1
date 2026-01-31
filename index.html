@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reach AI</title>
+  <link rel="icon" type="image/png" href="/algorax_icon_v4.png" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Cairo', 'sans-serif'],
+            mono: ['Fira Code', 'monospace'],
+          },
+          animation: {
+            'spin-slow': 'spin 3s linear infinite',
+            'shimmer': 'shimmer 2s infinite linear',
+            'pulse-fast': 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+          },
+          keyframes: {
+            shimmer: {
+              '0%': { transform: 'translateX(-100%)' },
+              '100%': { transform: 'translateX(100%)' }
+            }
+          },
+          colors: {
+            gray: {
+              850: '#1f2937',
+              900: '#111827',
+              950: '#030712',
+            },
+            ai: {
+              bg: '#020617',
+              card: '#0f172a',
+              accent: '#06b6d4', // Cyan-500
+              glow: '#22d3ee',   // Cyan-400
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800&family=Fira+Code:wght@400;600&display=swap"
+    rel="stylesheet">
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+
+  <!-- Leaflet MarkerCluster CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
+
+  <style>
+    body {
+      font-family: 'Cairo', sans-serif;
+    }
+
+    /* Dark Popup Override */
+    .leaflet-popup-content-wrapper {
+      background: #ffffff;
+      color: #111827;
+      border-radius: 12px;
+      border: 1px solid #e5e7eb;
+    }
+
+    .dark .leaflet-popup-content-wrapper {
+      background: #1f2937;
+      color: white;
+      border: 1px solid #374151;
+    }
+
+    .leaflet-popup-tip {
+      background: #ffffff;
+    }
+
+    .dark .leaflet-popup-tip {
+      background: #1f2937;
+    }
+
+    .leaflet-container {
+      font-family: 'Cairo', sans-serif;
+    }
+
+    /* Marker Cluster Customization */
+    .marker-cluster-small {
+      background-color: rgba(99, 102, 241, 0.6);
+    }
+
+    .marker-cluster-small div {
+      background-color: rgba(99, 102, 241, 0.85);
+      color: white;
+    }
+
+    .marker-cluster-medium {
+      background-color: rgba(245, 158, 11, 0.6);
+    }
+
+    .marker-cluster-medium div {
+      background-color: rgba(245, 158, 11, 0.85);
+      color: white;
+    }
+
+    .marker-cluster-large {
+      background-color: rgba(239, 68, 68, 0.6);
+    }
+
+    .marker-cluster-large div {
+      background-color: rgba(239, 68, 68, 0.85);
+      color: white;
+    }
+
+    /* --- NEXT-GEN AI THEME "AETHER" --- */
+    .ai-theme {
+      --bg-deep: #030014;
+      /* Deep space violet-black */
+      --bg-panel: rgba(17, 17, 35, 0.4);
+      /* Ultra sheer */
+      --text-primary: #e2e8f0;
+      --text-glow: 0 0 20px rgba(124, 58, 237, 0.5);
+      /* Violet glow */
+      --border-neon: 1px solid rgba(139, 92, 246, 0.2);
+      --accent-primary: #8b5cf6;
+      /* Violet 500 */
+      --accent-secondary: #06b6d4;
+      /* Cyan 500 */
+      --accent-glow: #c084fc;
+    }
+
+    .ai-theme body {
+      background-color: var(--bg-deep) !important;
+      background-image:
+        radial-gradient(circle at 15% 50%, rgba(76, 29, 149, 0.15) 0%, transparent 50%),
+        radial-gradient(circle at 85% 30%, rgba(6, 182, 212, 0.15) 0%, transparent 50%),
+        linear-gradient(180deg, rgba(3, 0, 20, 0) 0%, rgba(3, 0, 20, 0.8) 100%),
+        url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%236366f1' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E") !important;
+      background-size: 100vw 100vh, 100vw 100vh, 100% 100%, 60px 60px !important;
+      background-attachment: fixed !important;
+      color: var(--text-primary) !important;
+    }
+
+    /* Ultra Glass Cards via Backdrop Filter */
+    .ai-theme .bg-white,
+    .ai-theme .dark\:bg-gray-800,
+    .ai-theme .bg-gray-50,
+    .ai-theme .dark\:bg-gray-900,
+    .ai-theme .bg-gray-900 {
+      background: linear-gradient(145deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.01) 100%) !important;
+      backdrop-filter: blur(24px) saturate(180%) !important;
+      -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+      border: 1px solid rgba(255, 255, 255, 0.08) !important;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(255, 255, 255, 0.05) !important;
+    }
+
+    /* Text Enhancement */
+    .ai-theme h1,
+    .ai-theme h2,
+    .ai-theme h3 {
+      background: linear-gradient(to right, #ffffff, #c4b5fd);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      text-shadow: 0 0 30px rgba(139, 92, 246, 0.3);
+    }
+
+    .ai-theme .font-black,
+    .ai-theme .font-bold {
+      color: white !important;
+    }
+
+    .ai-theme .text-gray-500,
+    .ai-theme .text-gray-400,
+    .ai-theme .dark\:text-gray-400 {
+      color: #94a3b8 !important;
+    }
+
+    /* Inputs - Futuristic */
+    .ai-theme input,
+    .ai-theme select,
+    .ai-theme textarea {
+      background-color: rgba(10, 10, 20, 0.6) !important;
+      border: 1px solid rgba(139, 92, 246, 0.3) !important;
+      color: #e2e8f0 !important;
+      border-radius: 8px !important;
+      transition: all 0.3s ease;
+    }
+
+    .ai-theme input:focus,
+    .ai-theme select:focus,
+    .ai-theme textarea:focus {
+      border-color: #8b5cf6 !important;
+      box-shadow: 0 0 15px rgba(139, 92, 246, 0.4) !important;
+      background-color: rgba(10, 10, 20, 0.8) !important;
+    }
+
+    /* Buttons - Neon Glow */
+    .ai-theme .bg-indigo-600,
+    .ai-theme .bg-blue-600,
+    .ai-theme .bg-emerald-600 {
+      background: linear-gradient(90deg, #7c3aed, #2563eb) !important;
+      border: 1px solid rgba(255, 255, 255, 0.2) !important;
+      box-shadow: 0 0 20px rgba(124, 58, 237, 0.5) !important;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .ai-theme .bg-indigo-600::after,
+    .ai-theme .bg-blue-600::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+      transition: 0.5s;
+    }
+
+    .ai-theme .bg-indigo-600:hover::after,
+    .ai-theme .bg-blue-600:hover::after {
+      left: 100%;
+    }
+
+    /* Sidebar */
+    .ai-theme aside {
+      border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
+      background: linear-gradient(180deg, rgba(5, 5, 12, 0.8), rgba(10, 10, 25, 0.9)) !important;
+      backdrop-filter: blur(40px) !important;
+    }
+
+    /* Scrollbar */
+    .ai-theme ::-webkit-scrollbar-thumb {
+      background: #4c1d95 !important;
+      border-radius: 4px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .ai-theme ::-webkit-scrollbar-track {
+      background: #020617 !important;
+    }
+
+    /* Leaflet Popups */
+    .ai-theme .leaflet-popup-content-wrapper {
+      background: rgba(15, 23, 42, 0.95) !important;
+      color: #e2e8f0 !important;
+      border: 1px solid rgba(139, 92, 246, 0.4) !important;
+      box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+    }
+
+    .ai-theme .leaflet-popup-tip {
+      background: rgba(15, 23, 42, 0.95) !important;
+    }
+  </style>
+
+  <!-- Global Leaflet Scripts -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
+  <!-- Leaflet Heat -->
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
+    "leaflet": "https://aistudiocdn.com/leaflet@^1.9.4",
+    "react-leaflet": "https://aistudiocdn.com/react-leaflet@^5.0.0",
+    "recharts": "https://aistudiocdn.com/recharts@^3.5.1",
+    "firebase/app": "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js",
+    "firebase/firestore": "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js",
+    "firebase/analytics": "https://www.gstatic.com/firebasejs/10.13.0/firebase-analytics.js",
+    "papaparse": "https://esm.sh/papaparse@5.4.1",
+    "firebase/": "https://aistudiocdn.com/firebase@^12.6.0/",
+    "leaflet/": "https://esm.sh/leaflet@^1.9.4/"
+  }
+}
+</script>
+  <link rel="stylesheet" href="/index.css">
+</head>
+
+<body
+  class="bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-white antialiased overflow-hidden h-screen flex flex-col transition-colors duration-300">
+  <div id="root" class="flex-grow flex flex-col h-full"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+
+</html>

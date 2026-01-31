@@ -1,0 +1,7 @@
+{
+  "name": "ReachAI",
+  "description": "Intelligent route optimization tool that visualizes customer paths, calculates metrics, and generates AI-powered driver reports.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}

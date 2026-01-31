@@ -1,0 +1,21 @@
+export const AVAILABLE_FEATURES = [
+    "Basic Route Planning",
+    "Standard Map View",
+    "Mobile App Access",
+    "Email Support",
+    "Advanced Route Optimization",
+    "Performance Reports & Analytics",
+    "Data Export (Excel/CSV)",
+    "Priority Email Support",
+    "Multiple Branch Management",
+    "Dedicated Account Manager",
+    "Custom API Integration",
+    "Real-time Fleet Tracking",
+    "Custom Onboarding",
+    "SLA Guarantees",
+    "White-label Branding",
+    "AI Insights & Recommendations",
+    "Unlimited History",
+    "Field Agent App",
+    "Proof of Delivery"
+];
