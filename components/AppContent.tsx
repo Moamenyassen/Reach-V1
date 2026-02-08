@@ -257,12 +257,12 @@ const AppContent: React.FC<AppContentProps> = (props) => {
             )}
 
             {!isLimbo && view === ViewMode.LEGACY_INSIGHTS && <Insights currentUser={currentUser} currentCompany={currentCompany} allCustomers={allCustomers} userList={users} uploadHistory={uploadHistory} onNavigate={setView} onLogout={onLogout} hideHeader={props.hideHeader} {...controlProps} />}
-            {!isLimbo && view === ViewMode.DASHBOARD && <RouteSequence onBack={() => setView(ViewMode.LEGACY_INSIGHTS)} settings={currentCompany?.settings || DEFAULT_COMPANY_SETTINGS} companyId={currentCompany?.id} activeVersionId={activeVersionId} {...controlProps} hideHeader={props.hideHeader} />}
+            {!isLimbo && view === ViewMode.DASHBOARD && <RouteSequence onBack={() => setView(ViewMode.LEGACY_INSIGHTS)} settings={currentCompany?.settings || DEFAULT_COMPANY_SETTINGS} companyId={currentCompany?.id} activeVersionId={activeVersionId} userRole={currentUser?.role} userBranchIds={currentUser?.branchIds} {...controlProps} hideHeader={props.hideHeader} />}
             {!isLimbo && view === ViewMode.FULL_SUMMARY && <DetailedReports currentUser={currentUser} allCustomers={accessibleCustomers} uploadHistory={uploadHistory} onBack={() => setView(ViewMode.LEGACY_INSIGHTS)} {...controlProps} hideHeader={props.hideHeader} currentFilters={props.currentFilters} />}
             {!isLimbo && view === ViewMode.AI_SUGGESTIONS && <AIOptimizer customers={accessibleCustomers} onBack={() => setView(ViewMode.LEGACY_INSIGHTS)} {...controlProps} hideHeader={props.hideHeader} />}
             {!isLimbo && view === ViewMode.MARKET_SCANNER && <MarketScanner existingCustomers={accessibleCustomers} onBack={() => setView(ViewMode.LEGACY_INSIGHTS)} settings={currentCompany?.settings || DEFAULT_COMPANY_SETTINGS} maxScannerCap={currentCompany?.maxScannerCap} {...controlProps} hideHeader={props.hideHeader} />}
-            {!isLimbo && view === ViewMode.PRICING && <Pricing onBack={() => setView(ViewMode.LEGACY_INSIGHTS)} hideHeader={props.hideHeader} />}
-            {!isLimbo && view === ViewMode.REACH_PRICING && (
+            {!isLimbo && (currentUser.role === UserRole.ADMIN) && view === ViewMode.PRICING && <Pricing onBack={() => setView(ViewMode.LEGACY_INSIGHTS)} hideHeader={props.hideHeader} isAiTheme={controlProps.isAiTheme} onSubscribe={(plan) => onSubscribe(plan, 'monthly')} />}
+            {!isLimbo && (currentUser.role === UserRole.ADMIN) && view === ViewMode.REACH_PRICING && (
                 <ReachPricing
                     onBack={() => setView(ViewMode.PRICING)}
                     isAiTheme={controlProps.isAiTheme}
@@ -279,6 +279,8 @@ const AppContent: React.FC<AppContentProps> = (props) => {
                 hideHeader={props.hideHeader}
                 onUpdateCustomer={props.onUpdateCustomer}
                 companySettings={currentCompany?.settings || DEFAULT_COMPANY_SETTINGS}
+                userRole={currentUser?.role} // Pass user role for access control
+                userBranchIds={currentUser?.branchIds} // Pass user's assigned branches
                 {...controlProps}
                 onUpload={(currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.MANAGER)
                     ? () => setView(ViewMode.ADMIN_DASHBOARD)

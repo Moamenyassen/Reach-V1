@@ -156,7 +156,10 @@ export const processNormalizedCSVUpload = async (
         // ==========================================
         // STEP 1: EXTRACT & UPSERT BRANCHES
         // ==========================================
-        onProgress?.({ step: 1, stepName: 'Processing Branches', percent: 0, totalCount: rows.length, currentCount: 0 });
+        // ==========================================
+        // STEP 1: EXTRACT & UPSERT BRANCHES
+        // ==========================================
+        onProgress?.({ step: 1, stepName: 'Scanning Rows for Branches', percent: 0, totalCount: rows.length, currentCount: 0 });
 
         console.log('[ETL] Starting ETL. Columns Mapped:', Object.keys(mapping).length);
         console.log('[ETL] Mapping Config:', mapping);
@@ -166,7 +169,7 @@ export const processNormalizedCSVUpload = async (
         stats.branches.total = branchMap.size;
         stats.branches.added = branchMap.size;
 
-        onProgress?.({ step: 1, stepName: 'Processing Branches', percent: 100, currentCount: branchMap.size, totalCount: branchMap.size });
+        onProgress?.({ step: 1, stepName: 'Branches Processed', percent: 100, currentCount: branchMap.size, totalCount: branchMap.size });
 
         // ==========================================
         // STEP 2: EXTRACT & UPSERT REPS (SKIPPED PER USER REQUEST)
@@ -254,64 +257,68 @@ async function bulkInsertRawData(
     uploadBatchId: string,
     onProgress?: (progress: ETLProgress) => void
 ) {
-    const rawBatch = [];
-    const batchSize = 250;
+    const BATCH_SIZE = 2000; // Increased
+    const CONCURRENCY_LIMIT = 5; // Parallel requests
     let processedCount = 0;
 
     onProgress?.({ step: 0, stepName: 'Backing up Raw Data', percent: 0, totalCount: rows.length, currentCount: 0 });
-    console.log(`[ETL] Starting Raw Backup. Total rows: ${rows.length}, Batch Size: ${batchSize}, Company: ${companyId}`);
+    console.log(`[ETL-Opt] Starting Concurrent Raw Backup. Total: ${rows.length}, Batch: ${BATCH_SIZE}, Concurrency: ${CONCURRENCY_LIMIT}`);
 
-    for (const row of rows) {
-        rawBatch.push({
-            company_id: companyId,
-            region: row[mapping.region] || row[mapping.branch_name] || null,
-            branch_code: row[mapping.branch_code] || null,
-            branch_name: row[mapping.branch_name] || null,
-            route_name: row[mapping.route_name] || null,
-            rep_code: row[mapping.rep_code] || null,
-            client_code: row[mapping.client_code] || null,
-            customer_name_en: row[mapping.customer_name_en] || null,
-            customer_name_ar: row[mapping.customer_name_ar] || null,
-            address: row[mapping.address] || null,
-            phone: row[mapping.phone] || null,
-            district: row[mapping.district] || null,
-            vat: row[mapping.vat] || null,
-            buyer_id: row[mapping.buyer_id] || null,
-            classification: row[mapping.classification] || null,
-            store_type: row[mapping.store_type] || null,
-            lat: parseFloat(row[mapping.lat]) || null,
-            lng: parseFloat(row[mapping.lng]) || null,
-            week_number: row[mapping.week_number]?.toString() || null,
-            day_name: row[mapping.day_name] || null,
-            upload_batch_id: uploadBatchId
+    // Pre-map all rows to raw tokens to avoid overhead in loop
+    const allRawRows = rows.map(row => ({
+        company_id: companyId,
+        region: row[mapping.region] || row[mapping.branch_name] || null,
+        branch_code: row[mapping.branch_code] || null,
+        branch_name: row[mapping.branch_name] || null,
+        route_name: row[mapping.route_name] || null,
+        rep_code: row[mapping.rep_code] || null,
+        client_code: row[mapping.client_code] || null,
+        customer_name_en: row[mapping.customer_name_en] || null,
+        customer_name_ar: row[mapping.customer_name_ar] || null,
+        address: row[mapping.address] || null,
+        phone: row[mapping.phone] || null,
+        district: row[mapping.district] || null,
+        vat: row[mapping.vat] || null,
+        buyer_id: row[mapping.buyer_id] || null,
+        classification: row[mapping.classification] || null,
+        store_type: row[mapping.store_type] || null,
+        lat: parseFloat(row[mapping.lat]) || null,
+        lng: parseFloat(row[mapping.lng]) || null,
+        week_number: row[mapping.week_number]?.toString() || null,
+        day_name: row[mapping.day_name] || null,
+        upload_batch_id: uploadBatchId
+    }));
+
+    // Chunk the data
+    const chunks = [];
+    for (let i = 0; i < allRawRows.length; i += BATCH_SIZE) {
+        chunks.push(allRawRows.slice(i, i + BATCH_SIZE));
+    }
+
+    // Process chunks with concurrency limit
+    for (let i = 0; i < chunks.length; i += CONCURRENCY_LIMIT) {
+        const batchPromises = chunks.slice(i, i + CONCURRENCY_LIMIT).map(async (chunk) => {
+            const { error } = await supabase.from('company_uploaded_data').insert(chunk);
+            if (error) throw new Error(`Raw Data Insert Failed: ${error.message}`);
+
+            processedCount += chunk.length;
+
+            // Only update progress periodically
+            if (processedCount % (BATCH_SIZE * 2) === 0 || processedCount === rows.length) {
+                onProgress?.({
+                    step: 0,
+                    stepName: 'Backing up Raw Data (Optimized)',
+                    percent: Math.round((processedCount / rows.length) * 100),
+                    totalCount: rows.length,
+                    currentCount: processedCount
+                });
+            }
         });
 
-        if (rawBatch.length >= batchSize) {
-            const { error } = await supabase.from('company_uploaded_data').insert(rawBatch);
-            if (error) {
-                console.error("[ETL] Raw Insert Error:", error);
-                throw new Error(`Raw Data Backup Failed: ${error.message}`);
-            }
-            processedCount += rawBatch.length;
-            onProgress?.({
-                step: 0,
-                stepName: 'Backing up Raw Data',
-                percent: Math.round((processedCount / rows.length) * 100),
-                totalCount: rows.length,
-                currentCount: processedCount
-            });
-            console.log(`[ETL] Backed up ${processedCount}/${rows.length} raw rows...`);
-            rawBatch.length = 0;
-        }
+        await Promise.all(batchPromises);
+        console.log(`[ETL-Opt] Processed ${processedCount}/${rows.length} raw rows...`);
     }
 
-    if (rawBatch.length > 0) {
-        const { error } = await supabase.from('company_uploaded_data').insert(rawBatch);
-        if (error) {
-            console.error("[ETL] Raw Final Insert Error:", error);
-            throw new Error(`Raw Data Backup Failed: ${error.message}`);
-        }
-    }
     onProgress?.({ step: 0, stepName: 'Raw Data Backup Complete', percent: 100, totalCount: rows.length, currentCount: rows.length });
 }
 
@@ -459,7 +466,7 @@ async function extractAndUpsertReps(
     console.log(`[ETL] Upserting ${repArray.length} Reps. BranchMapSize: ${branchMap.size}`);
 
     // BATCHED UPSERT to avoid timeouts/limits and potential FK race conditions
-    const BATCH_SIZE = 1000;
+    const BATCH_SIZE = 2500; // Increased from 1000
     const repMap = new Map<string, string>();
 
     for (let i = 0; i < repArray.length; i += BATCH_SIZE) {
@@ -502,25 +509,30 @@ async function extractAndUpsertRoutes(
 ): Promise<Map<string, string>> {
 
     // Extract unique routes from CSV
-    // Key: "branchCode|routeName" to handle same route name in different branches
+    // Key: "regionCode|routeName" to handle same route name in different branches
     const routeSet = new Map<string, { name: string; rep_code: string; branch_id: string }>();
 
     for (const row of rows) {
-        const branchCode = (row[mapping.branch_code] || 'UNASSIGNED').toString().trim().toUpperCase();
+        // PER USER RULE: Branch separation is based on Region Code
+        const regionCode = (row[mapping.branch_code] || 'UNASSIGNED').toString().trim().toUpperCase();
         const routeName = (row[mapping.route_name] || '').toString().trim();
         const repCode = (row[mapping.rep_code] || '').toString().trim();
 
-        const branchId = branchMap.get(branchCode);
+        const branchId = branchMap.get(regionCode);
+
+        // Debug log for standard region matching
+        if (Math.random() < 0.0001) console.log(`[ETL] Route Check: ${routeName} -> Region: ${regionCode} -> Found: ${!!branchId}`);
 
         if (!branchId || !routeName) continue;
 
         // GLOBAL UNIQUENESS: Key just by routeName (ignoring branch) per user request
+        // BUT we must associate it with the correct branch (via region code)
         const key = routeName;
         if (!routeSet.has(key)) {
             routeSet.set(key, {
                 name: routeName,
                 rep_code: repCode || null as any,
-                branch_id: branchId // First branch wins
+                branch_id: branchId // Linked via region code
             });
         }
     }
@@ -540,7 +552,7 @@ async function extractAndUpsertRoutes(
     }));
 
     // Split into batches
-    const BATCH_SIZE = 1000;
+    const BATCH_SIZE = 2500; // Increased from 1000
     const routeMap = new Map<string, string>();
     const branchIdToCode = new Map<string, string>();
     for (const [code, id] of branchMap.entries()) branchIdToCode.set(id, code);
@@ -662,7 +674,7 @@ async function extractAndUpsertCustomers(
 
     // Batch upsert customers (in chunks to avoid timeout)
     const customerArray = Array.from(customerSet.values());
-    const BATCH_SIZE = 500;
+    const BATCH_SIZE = 2500; // Increased from 500
     const customerMap = new Map<string, string>();
 
     // Create reverse branchId -> branchCode map
@@ -802,7 +814,7 @@ async function bulkInsertRouteVisits(
     }
 
     // Batch insert visits (in chunks)
-    const BATCH_SIZE = 1000;
+    const BATCH_SIZE = 2500; // Increased from 1000
 
     for (let i = 0; i < visitArray.length; i += BATCH_SIZE) {
         const batch = visitArray.slice(i, i + BATCH_SIZE);
@@ -962,7 +974,7 @@ export async function getNormalizedDataStats(companyId: string): Promise<{
     visits: number;
 }> {
     const [branchRes, routeRes, customerRes, visitRes] = await Promise.all([
-        supabase.from('branches').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
+        supabase.from('company_branches').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
         supabase.from('routes').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
         supabase.from('normalized_customers').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
         supabase.from('route_visits').select('id', { count: 'exact', head: true }).eq('company_id', companyId)

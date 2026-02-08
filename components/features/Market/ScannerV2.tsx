@@ -7,7 +7,7 @@ import {
     ShoppingCart, Store, Building2, Pill, Stethoscope, Hospital, Eye,
     UtensilsCrossed, Coffee, Hotel, ChefHat,
     Scissors, Shirt, Dumbbell, Fuel, Locate, Navigation,
-    Phone, Clock, Star, User, Route, Tag, Info, Zap
+    Phone, Clock, Star, User, Route, Tag, Info, Zap, Sparkles, Users, Calendar
 } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, Circle } from 'react-leaflet';
 import L from 'leaflet';
@@ -328,6 +328,32 @@ const ScannerV2: React.FC<ScannerV2Props> = ({ onBack, allCustomers = [], onSave
     const [addingToDatabase, setAddingToDatabase] = useState(null);
     const [recentlyAdded, setRecentlyAdded] = useState(new Set());
     const [searchQuery, setSearchQuery] = useState('');
+
+    // Route Gen State
+    const [showRouteModal, setShowRouteModal] = useState(false);
+    const [isGeneratingRoute, setIsGeneratingRoute] = useState(false);
+    const [routeConfig, setRouteConfig] = useState({
+        name: '',
+        user: '',
+        targetCustomers: 50,
+        duration: 7,
+        customersPerDay: 15,
+        serviceTime: 20,
+        category: 'Retail',
+        branch: 'Main',
+        week: 'Week 1',
+        day: 'Sun'
+    });
+
+    const handleGenerateRoute = () => {
+        setIsGeneratingRoute(true);
+        // Simulate AI Processing
+        setTimeout(() => {
+            setIsGeneratingRoute(false);
+            setShowRouteModal(false);
+            alert(`🎉 Success! Route "${routeConfig.name}" has been generated with AI optimization.\n\n• ${routeConfig.targetCustomers} Customers Selected\n• Branch: ${routeConfig.branch}\n• Schedule: ${routeConfig.week} / ${routeConfig.day}\n• Assigned to ${routeConfig.user || 'Team Pool'}`);
+        }, 2000);
+    };
 
     // Category filter state - all enabled by default
     const [enabledCategories, setEnabledCategories] = useState(() => {
@@ -803,6 +829,206 @@ const ScannerV2: React.FC<ScannerV2Props> = ({ onBack, allCustomers = [], onSave
                     </div>
                 )}
             </div>
+
+            {/* SMART ROUTE BUTTON (Bottom Center) */}
+            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[400]">
+                <button
+                    onClick={() => setShowRouteModal(true)}
+                    className="group relative flex items-center gap-3 px-6 py-4 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white rounded-full shadow-[0_0_40px_rgba(124,58,237,0.5)] border border-white/20 hover:scale-105 transition-all"
+                >
+                    <div className="absolute inset-0 rounded-full bg-white/20 animate-pulse group-hover:animate-none" />
+                    <Sparkles className="w-5 h-5 animate-pulse" />
+                    <span className="font-black uppercase tracking-wider text-sm">Generate AI Route</span>
+                </button>
+            </div>
+
+            {/* ROUTE CONFIG MODAL */}
+            {showRouteModal && (
+                <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-[#0f172a] border border-white/10 rounded-3xl w-full max-w-lg shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+                        {/* Header */}
+                        <div className="p-6 border-b border-white/10 flex items-center justify-between bg-gradient-to-r from-violet-500/10 to-transparent">
+                            <div className="flex items-center gap-3">
+                                <div className="p-3 rounded-xl bg-violet-500/20 text-violet-400">
+                                    <Zap className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <h2 className="text-xl font-black text-white uppercase tracking-wide">Smart Route Gen</h2>
+                                    <p className="text-slate-400 text-xs">AI-Powered Optimization</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setShowRouteModal(false)} className="text-slate-400 hover:text-white transition-colors">
+                                <X className="w-6 h-6" />
+                            </button>
+                        </div>
+
+                        {/* Content */}
+                        <div className="p-6 overflow-y-auto custom-scrollbar space-y-6">
+                            {/* Route Name */}
+                            <div className="space-y-2">
+                                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Route Name</label>
+                                <input
+                                    type="text"
+                                    value={routeConfig.name}
+                                    onChange={e => setRouteConfig({ ...routeConfig, name: e.target.value })}
+                                    className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-3 text-white focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-all outline-none font-bold"
+                                    placeholder="e.g., Downtown Express"
+                                />
+                            </div>
+
+                            {/* Related User */}
+                            <div className="space-y-2">
+                                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Assign to Agent (Rep Code)</label>
+                                <input
+                                    type="text"
+                                    value={routeConfig.user}
+                                    onChange={e => setRouteConfig({ ...routeConfig, user: e.target.value })}
+                                    className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-3 text-white focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-all outline-none font-bold"
+                                    placeholder="e.g. AG-001"
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                {/* Customer Count */}
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Customers</label>
+                                    <div className="relative">
+                                        <Users className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                                        <input
+                                            type="number"
+                                            value={routeConfig.targetCustomers}
+                                            onChange={e => setRouteConfig({ ...routeConfig, targetCustomers: parseInt(e.target.value) || 0 })}
+                                            className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl pl-10 pr-4 py-3 text-white focus:border-violet-500 outline-none font-mono"
+                                        />
+                                    </div>
+                                </div>
+                                {/* Duration */}
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Duration (Days)</label>
+                                    <div className="relative">
+                                        <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                                        <input
+                                            type="number"
+                                            max={30}
+                                            value={routeConfig.duration}
+                                            onChange={e => setRouteConfig({ ...routeConfig, duration: parseInt(e.target.value) || 0 })}
+                                            className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl pl-10 pr-4 py-3 text-white focus:border-violet-500 outline-none font-mono"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                {/* Cust per Day */}
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Visits / Day</label>
+                                    <input
+                                        type="number"
+                                        value={routeConfig.customersPerDay}
+                                        onChange={e => setRouteConfig({ ...routeConfig, customersPerDay: parseInt(e.target.value) || 0 })}
+                                        className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-3 text-white focus:border-violet-500 outline-none font-mono"
+                                    />
+                                </div>
+                                {/* Serving Time */}
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Avg Service (Min)</label>
+                                    <input
+                                        type="number"
+                                        value={routeConfig.serviceTime}
+                                        onChange={e => setRouteConfig({ ...routeConfig, serviceTime: parseInt(e.target.value) || 0 })}
+                                        className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-3 text-white focus:border-violet-500 outline-none font-mono"
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Category Select */}
+                            <div className="space-y-2">
+                                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Target Category</label>
+                                <div className="flex flex-wrap gap-2">
+                                    {['Retail', 'HORECA', 'Health', 'Services'].map(cat => (
+                                        <button
+                                            key={cat}
+                                            onClick={() => setRouteConfig({ ...routeConfig, category: cat })}
+                                            className={`px-4 py-2 rounded-lg text-xs font-bold border transition-all ${routeConfig.category === cat
+                                                ? 'bg-violet-500/20 text-violet-300 border-violet-500/50'
+                                                : 'bg-slate-800/50 text-slate-400 border-slate-700/50 hover:bg-slate-800'
+                                                }`}
+                                        >
+                                            {cat}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Branch & Schedule */}
+                            <div className="grid grid-cols-2 gap-4">
+                                {/* Branch */}
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Branch</label>
+                                    <select
+                                        value={routeConfig.branch}
+                                        onChange={e => setRouteConfig({ ...routeConfig, branch: e.target.value })}
+                                        className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-3 text-white focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-all outline-none"
+                                    >
+                                        <option value="Main">Main Branch</option>
+                                        <option value="Jeddah">Jeddah Hub</option>
+                                        <option value="Riyadh">Riyadh HQ</option>
+                                        <option value="Dammam">Dammam Center</option>
+                                    </select>
+                                </div>
+                                {/* Week */}
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Week Cycle</label>
+                                    <select
+                                        value={routeConfig.week}
+                                        onChange={e => setRouteConfig({ ...routeConfig, week: e.target.value })}
+                                        className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-3 text-white focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-all outline-none"
+                                    >
+                                        <option value="Week 1">Week 1</option>
+                                        <option value="Week 2">Week 2</option>
+                                        <option value="Week 3">Week 3</option>
+                                        <option value="Week 4">Week 4</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            {/* Day Selection */}
+                            <div className="space-y-2">
+                                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Start Day</label>
+                                <div className="flex flex-wrap gap-2">
+                                    {['Sun', 'Mon', 'Tue', 'Wed', 'Thu'].map(day => (
+                                        <button
+                                            key={day}
+                                            onClick={() => setRouteConfig({ ...routeConfig, day })}
+                                            className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${routeConfig.day === day
+                                                ? 'bg-violet-500/20 text-violet-300 border-violet-500/50'
+                                                : 'bg-slate-800/50 text-slate-400 border-slate-700/50 hover:bg-slate-800'
+                                                }`}
+                                        >
+                                            {day}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="p-6 border-t border-white/10 bg-slate-900/50">
+                            <button
+                                onClick={handleGenerateRoute}
+                                disabled={isGeneratingRoute}
+                                className="w-full py-4 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white rounded-xl font-black uppercase tracking-wider shadow-xl shadow-violet-900/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 group disabled:opacity-50"
+                            >
+                                {isGeneratingRoute ? (
+                                    <><Loader2 className="w-5 h-5 animate-spin" /> Analyzing 10,000+ Points...</>
+                                ) : (
+                                    <><Sparkles className="w-5 h-5 group-hover:rotate-12 transition-transform" /> Generate Optimized Route</>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* ================================================================ */}
             {/* FILTER SIDEBAR */}

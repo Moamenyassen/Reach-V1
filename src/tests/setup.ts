@@ -4,7 +4,7 @@
  * Global mocks and configuration for all tests
  */
 
-import { vi } from 'vitest';
+import { vi, afterEach } from 'vitest';
 
 // Mock localStorage
 const localStorageMock = {

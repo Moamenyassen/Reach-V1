@@ -13,7 +13,7 @@ import {
   deleteDoc
 } from "firebase/firestore";
 import { User, UserRole, Customer, HistoryLog, Company } from "../types";
-import { BRANCHES } from "../constants";
+import { BRANCHES } from "../config/constants";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBc4Aam5pdipIfc2B4Ymk4A3NRWxFHU8Dc",

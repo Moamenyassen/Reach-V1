@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { TRANSLATIONS, DEFAULT_COMPANY_SETTINGS } from '../../../config/constants';
-import { Customer, RouteSummary, CompanySettings } from '../../../types';
+import { Customer, RouteSummary, CompanySettings, NormalizedBranch } from '../../../types';
 import { optimizeRoute, calculateDistance, analyzeSameLocation, countNearbyCustomers, OptimizerConfig } from '../../../services/optimizer';
-import { supabase, fetchFilteredRoutes, fetchUniqueFilterData, fetchRoutePortfolioCount } from '../../../services/supabase';
+import { supabase, fetchFilteredRoutes, fetchUniqueFilterData, fetchRoutePortfolioCount, fetchRouteCustomersNormalized, fetchCompanyRoutes } from '../../../services/supabase';
 import MapVisualizer from '../../MapVisualizer';
 import ErrorBoundary from '../../ErrorBoundary';
 import {
@@ -28,6 +28,9 @@ interface RouteSequenceProps {
     settings?: CompanySettings;
     // Removed external props passed for old filtering
     hideHeader?: boolean;
+    // NEW: For branch-based access control
+    userRole?: string;
+    userBranchIds?: string[];
 }
 
 const InfoTooltip = ({ content }: { content: string }) => (
@@ -170,7 +173,9 @@ const MultiSelect: React.FC<MultiSelectProps> = ({ title, options, selected, onC
     );
 };
 
-const RouteSequence: React.FC<RouteSequenceProps> = ({ companyId, activeVersionId, onBack, isDarkMode, language, settings, hideHeader = false }) => {
+const RouteSequence: React.FC<RouteSequenceProps> = ({ companyId, activeVersionId, onBack, isDarkMode, language, settings, hideHeader = false, userRole, userBranchIds }) => {
+    // Check if user is admin/manager (can see all data)
+    const isAdmin = !userRole || ['ADMIN', 'MANAGER', 'SYSADMIN'].includes(userRole.toUpperCase());
 
     const t = TRANSLATIONS[language];
     const isAr = language === 'ar';
@@ -220,10 +225,12 @@ const RouteSequence: React.FC<RouteSequenceProps> = ({ companyId, activeVersionI
     const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
     const [isRoutesLoading, setIsRoutesLoading] = useState(false);
     const [routePortfolioCount, setRoutePortfolioCount] = useState<number>(0);
-    const [debugInfo, setDebugInfo] = useState<{ rowCount: number; normalizedCount: number; globalCount: number; companyId: string; error?: string }>({
+    const [dbBranches, setDbBranches] = useState<NormalizedBranch[]>([]);
+    const [debugInfo, setDebugInfo] = useState<{ rowCount: number; normalizedCount: number; globalCount: number; routeVisitsCount: number; companyId: string; error?: string }>({
         rowCount: 0,
         normalizedCount: 0,
         globalCount: 0,
+        routeVisitsCount: 0,
         companyId: companyId || 'N/A'
     });
 
@@ -248,39 +255,67 @@ const RouteSequence: React.FC<RouteSequenceProps> = ({ companyId, activeVersionI
                 .from('company_uploaded_data')
                 .select('*', { count: 'exact', head: true });
 
-            console.info('[DEBUG] counts - Raw:', companyCount, 'Normalized:', normalizedCount, 'Global:', globalCount);
+            // NEW: Check Route Visits
+            const { count: visitsCount } = await supabase
+                .from('route_visits')
+                .select('*', { count: 'exact', head: true })
+                .eq('company_id', companyId);
+
+            console.info('[DEBUG] counts - Raw:', companyCount, 'Normalized:', normalizedCount, 'Visits:', visitsCount, 'Global:', globalCount);
             setDebugInfo(prev => ({
                 ...prev,
                 rowCount: companyCount || 0,
                 normalizedCount: normalizedCount || 0,
                 globalCount: globalCount || 0,
+                routeVisitsCount: visitsCount || 0,
                 companyId
             }));
         };
         checkData();
     }, [companyId]);
 
-    // Initial Load - Branches (Direct Query to company_uploaded_data via RPC)
+    // Initial Load - Branches (Direct Query to company_branches table)
+    // NEW: Filter branches by user's assigned branches for non-admin users
     useEffect(() => {
         if (!companyId) return;
 
         const loadBranches = async () => {
-            console.log('[RouteSequence] Loading branches for company:', companyId);
+            console.log('[RouteSequence] Loading DB branches for start nodes:', companyId, 'isAdmin:', isAdmin, 'userBranchIds:', userBranchIds);
+            try {
+                const { getBranches } = await import('../../../services/supabase');
+                let branches = await getBranches(companyId);
 
-            // Fetch unique branches with counts
-            const data = await fetchUniqueFilterData(companyId, 'branch_name');
-            console.log('[RouteSequence] Found branches:', data);
+                // NEW: Filter branches for non-admin users
+                if (!isAdmin && userBranchIds && userBranchIds.length > 0) {
+                    console.log('[RouteSequence] Filtering branches for restricted user. Allowed branches:', userBranchIds);
+                    branches = branches.filter(b =>
+                        userBranchIds.includes(b.name_en) ||
+                        userBranchIds.includes(b.id) ||
+                        userBranchIds.includes(b.code)
+                    );
+                    console.log('[RouteSequence] Filtered branches count:', branches.length);
+                }
 
-            setAvailableRegions(data);
+                setDbBranches(branches);
 
-            // Auto-select first branch if none selected
-            if (data.length > 0 && selectedRegions.length === 1 && selectedRegions[0] === 'All' && !localStorage.getItem('rg_dash_regions')) {
-                setSelectedRegions([data[0].val]);
+                // Map for dropdown
+                const branchOptions = branches.map(b => ({
+                    val: b.name_en,
+                    count: 0 // Count per branch not strictly needed for UI select but nice
+                }));
+                setAvailableRegions(branchOptions);
+
+                // Auto-select first branch if none selected
+                if (branchOptions.length > 0 && selectedRegions.length === 1 && selectedRegions[0] === 'All' && !localStorage.getItem('rg_dash_regions')) {
+                    setSelectedRegions([branchOptions[0].val]);
+                }
+            } catch (err) {
+                console.error("Failed to load DB branches:", err);
             }
         };
 
         loadBranches();
-    }, [companyId]);
+    }, [companyId, isAdmin, userBranchIds]);
 
     // Secondary Load - Routes (Direct Query to company_uploaded_data via RPC with Hierarchy)
     useEffect(() => {
@@ -289,37 +324,22 @@ const RouteSequence: React.FC<RouteSequenceProps> = ({ companyId, activeVersionI
         const loadRoutes = async () => {
             setIsRoutesLoading(true);
 
-            // Optimization: If many regions selected, fetching specific routes for each might be slow.
-            // If 'All' is selected, fetch all for company.
-            // If specific regions (even multiple), we can try to fetch all and filter in memory if needed, 
-            // OR finding a way to pass array. Since fetchUniqueFilterData uses string, we'll fetch ALL routes for company if multiple regions.
-            // This is safer than making 10 requests.
+            // Use normalized fetchCompanyRoutes which joins branches
+            // If selectedRegions includes 'All', pass undefined to fetchCompanyRoutes to get all for company
+            const branchFilter = selectedRegions.includes('All') ? undefined : selectedRegions;
 
-            // Logic:
-            // If selectedRegions includes 'All' -> Fetch all routes.
-            // If selectedRegions has items -> We CAN'T efficiently filter by multiple branches via current RPC.
-            // Fallback: Fetch ALL routes for company (ignore branch filter) when multiple branches selected.
-            // This ensures user sees all possible routes.
+            const data = await fetchCompanyRoutes(companyId, branchFilter);
 
-            const isMultiRegion = !selectedRegions.includes('All') && selectedRegions.length > 0;
-            const singleRegion = isMultiRegion && selectedRegions.length === 1 ? selectedRegions[0] : undefined;
+            // Map to format expected by MultiSelect { val, count }
+            const mappedRoutes = data.map((r: any) => ({
+                val: r.routeName,
+                count: 0 // Count not provided by this function, but UI handles 0
+            }));
 
-            // If strictly ONE region is selected, filter by it. Otherwise fetch all.
-            const filterCol = singleRegion ? 'branch_name' : undefined;
-            const filterVal = singleRegion ? singleRegion : undefined;
-
-            const data = await fetchUniqueFilterData(
-                companyId,
-                'route_name',
-                filterCol,
-                filterVal
-            );
-
-            setAvailableRoutes(data);
+            setAvailableRoutes(mappedRoutes);
             setIsRoutesLoading(false);
 
-            // Auto-select logic if needed (Removing strict auto-select to allow 'All')
-            if (data.length === 0) {
+            if (mappedRoutes.length === 0) {
                 setSelectedRoutes(['All']);
             }
         };
@@ -381,39 +401,51 @@ const RouteSequence: React.FC<RouteSequenceProps> = ({ companyId, activeVersionI
         localStorage.setItem('rg_dash_days', JSON.stringify(selectedDays));
 
         try {
-            // Fetch portfolio count for this route (denominator)
-            // Note: fetchRoutePortfolioCount accepts strings. If multi-select, it might be inaccurate if we don't update it.
-            // For now, if single route, use it. If multiple, maybe 0 or aggregate?
-            // Updated fetchRoutePortfolioCount or usage needed? For now, let's pass 'All' if multiple routes selected to avoid error, or first one?
-            // Ideally should refactor that too, but let's pass the raw values and let the updated API handle if possible.
-            // Current `fetchRoutePortfolioCount` in Supabase likely takes string.
-            // We will skip portfolio count update for multi-route for now or use the first one if only 1 selected.
-            let portfolio = 0;
-            if (selectedRoutes.length === 1 && selectedRoutes[0] !== 'All') {
-                portfolio = await fetchRoutePortfolioCount(companyId, selectedRoutes[0], selectedRegions.length === 1 ? selectedRegions[0] : 'All');
-            }
-            setRoutePortfolioCount(portfolio);
+            // Aggregate portfolio count for all selected routes
+            let totalPortfolio = 0;
+            const routeList = selectedRoutes.includes('All') ? availableRoutes.map(r => r.val) : selectedRoutes;
 
-            // NEW: Use Normalized fetchFilteredRoutes instead of direct raw table query
-            const allRouteData = await fetchFilteredRoutes(
+            // If strictly ONE region is selected, use it for portfolio scope
+            const branchName = selectedRegions.length === 1 && selectedRegions[0] !== 'All' ? selectedRegions[0] : 'All';
+
+            const portfolioPromises = routeList.map(r => fetchRoutePortfolioCount(companyId, r, branchName));
+            const portfolioResults = await Promise.all(portfolioPromises);
+            totalPortfolio = portfolioResults.reduce((sum, count) => sum + count, 0);
+
+            setRoutePortfolioCount(totalPortfolio);
+
+            // 1. Try Normalized Fetch (Production Path)
+            let allRouteData = await fetchRouteCustomersNormalized(
                 companyId,
-                activeVersionId || 'active_routes',
                 {
                     region: selectedRegions,
                     route: selectedRoutes,
                     week: selectedWeeks,
                     day: selectedDays
-                },
-                0, // page
-                -1  // pageSize -1 means fetch all for this specific route
+                }
             );
+
+            // 2. Fallback to Legacy Fetch if normalized is empty (Migration support)
+            if (allRouteData.length === 0) {
+                console.info('[RouteSequence] Normalized data empty, trying legacy fetch...');
+                allRouteData = await fetchFilteredRoutes(
+                    companyId,
+                    activeVersionId || 'active_routes',
+                    {
+                        region: selectedRegions,
+                        route: selectedRoutes,
+                        week: selectedWeeks,
+                        day: selectedDays
+                    },
+                    0, // page
+                    -1  // pageSize
+                );
+            }
 
             setFilteredCustomers(allRouteData);
 
-            // Trigger Optimizer if we have data
             if (allRouteData.length > 0) {
-                // We'll let the optimizer useEffect handle the calculation
-                // just by setting the data
+                // Optimizer triggered via useEffect
             } else {
                 setTimelineRoute([]);
                 setSummary(null);
@@ -458,21 +490,20 @@ const RouteSequence: React.FC<RouteSequenceProps> = ({ companyId, activeVersionI
             const targetRegion = (selectedRegions.length === 1 && selectedRegions[0] !== 'All') ? selectedRegions[0] : filteredCustomers[0]?.regionCode;
 
             if (targetRegion) {
-                const branches = settings?.common?.general?.branches || [];
-                // Case-insensitive match for robustness
-                const branch = branches.find(b =>
-                    b.name.toLowerCase() === targetRegion.toLowerCase() ||
-                    b.id.toLowerCase() === targetRegion.toLowerCase()
+                // Use live DB branches for start coordinates
+                const branch = dbBranches.find(b =>
+                    b.name_en.toLowerCase() === targetRegion.toLowerCase() ||
+                    b.code?.toLowerCase() === targetRegion.toLowerCase()
                 );
 
-                if (branch && branch.coordinates) {
+                if (branch && branch.lat != null && branch.lng != null) {
                     startNode = {
                         id: `branch-${branch.id}`,
-                        name: `Start: ${branch.name}`,
-                        lat: branch.coordinates.lat,
-                        lng: branch.coordinates.lng,
+                        name: `Start: ${branch.name_en}`,
+                        lat: branch.lat,
+                        lng: branch.lng,
                         day: 'All',
-                        regionCode: branch.name,
+                        regionCode: branch.name_en,
                         routeName: 'DEPOT',
                         clientCode: 'BRANCH'
                     };
@@ -548,6 +579,21 @@ const RouteSequence: React.FC<RouteSequenceProps> = ({ companyId, activeVersionI
     // Use database values for weeks/days if available, otherwise use defaults
     const weeks = availableWeeks.length > 0 ? availableWeeks : ['Week One', 'Week Two', 'Week Three', 'Week Four'];
     const days = availableDays.length > 0 ? availableDays : ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Saturday'];
+
+    // Map dbBranches to BranchConfig for MapVisualizer
+    const mapBranchConfigs = useMemo(() => {
+        // Only show branches that are relevant to selected regions
+        return dbBranches
+            .filter(b => selectedRegions.includes('All') || selectedRegions.includes(b.name_en))
+            .map(b => ({
+                id: b.id,
+                name: b.name_en,
+                nameAr: b.name_ar,
+                code: b.code,
+                coordinates: { lat: b.lat || 0, lng: b.lng || 0 },
+                isActive: b.is_active
+            }));
+    }, [dbBranches, selectedRegions]);
 
     return (
         <div className="flex-1 flex flex-col w-full bg-gray-50/50 dark:bg-black font-sans pb-20 sm:pb-40 transition-colors duration-300 overflow-x-hidden">
@@ -638,6 +684,7 @@ const RouteSequence: React.FC<RouteSequenceProps> = ({ companyId, activeVersionI
                 <p>Company: <span className="text-gray-400">{debugInfo.companyId}</span></p>
                 <p>Raw Rows (Backup): <span className="text-gray-400 font-mono">{debugInfo.rowCount}</span></p>
                 <p>Normalized Rows: <span className="text-blue-400 font-bold font-mono">{debugInfo.normalizedCount}</span></p>
+                <p>Route Visits: <span className="text-rose-400 font-bold font-mono">{debugInfo.routeVisitsCount}</span></p>
                 <p>Global (All Co): <span className="text-emerald-400 font-bold font-mono">{debugInfo.globalCount}</span></p>
                 {debugInfo.error && (
                     <div className="mt-2 pt-2 border-t border-red-500/30 text-red-400">
@@ -771,7 +818,7 @@ const RouteSequence: React.FC<RouteSequenceProps> = ({ companyId, activeVersionI
                                     <section id="map-view" className="w-full h-[400px] sm:h-[550px] rounded-[2.5rem] shadow-2xl overflow-hidden relative z-0 ring-4 ring-gray-900 border border-gray-800">
                                         <MapVisualizer
                                             route={timelineRoute}
-                                            branches={[]} // Don't show all branches, only the start point (which is in the route)
+                                            branches={mapBranchConfigs}
                                             settings={settings}
                                             selectedCustomerId={selectedCustomerId}
                                         />

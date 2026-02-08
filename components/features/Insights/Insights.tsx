@@ -9,9 +9,9 @@ import {
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { motion } from 'framer-motion';
 
-import { User as UserType, Company, Customer } from '../../../types';
+import { User as UserType, Company, Customer, NormalizedBranch } from '../../../types';
 import { RouteHealthStats } from '../../../services/mockAnalytics';
-import { getDashboardInsights } from '../../../services/supabase';
+import { getDashboardInsights, getBranches } from '../../../services/supabase';
 import RedFlagCard from '../../common/RedFlagCard';
 import ReachCommandMap from './ReachCommandMap';
 
@@ -28,8 +28,9 @@ const PortalTooltip = ({ content, triggerRect }: { content: string, triggerRect:
   return createPortal(
     <div
       className="fixed z-[9999] px-3 py-2 bg-panel text-main text-[10px] font-medium uppercase tracking-wider rounded-lg shadow-2xl backdrop-blur-md border border-main whitespace-nowrap pointer-events-none transform -translate-x-1/2 -translate-y-full animate-in fade-in zoom-in-95 duration-200"
-      style={{ top: `${top}px`, left: `${left}px` }}
+      style={{ top: 'var(--tooltip-top)', left: 'var(--tooltip-left)' } as React.CSSProperties}
     >
+      <span style={{ '--tooltip-top': `${top}px`, '--tooltip-left': `${left}px` } as any} className="hidden" />
       {content}
       <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-panel" />
     </div>,
@@ -207,7 +208,11 @@ interface InsightsDashboardProps {
 }
 
 const InsightsDashboard: React.FC<InsightsDashboardProps> = (props) => {
-  const { hideHeader, currentCompany } = props;
+  const { hideHeader, currentCompany, currentUser } = props;
+
+  // NEW: Check if user is admin/manager (can see all data)
+  const isAdmin = !currentUser?.role || ['ADMIN', 'MANAGER', 'SYSADMIN'].includes(currentUser?.role?.toUpperCase?.() || '');
+  const userBranchIds = currentUser?.branchIds || [];
 
   // Safety extraction of settings with robust parsing check
   // stableSettingsKey ensures we only re-parse if the actual content changes, not just the object ref
@@ -225,17 +230,61 @@ const InsightsDashboard: React.FC<InsightsDashboardProps> = (props) => {
 
   const insightsSettings = settings?.modules?.insights || {};
   const optimizerSettings = settings?.modules?.optimizer || {};
-  const branches = settings?.common?.general?.branches || [];
+
+  // --- NEW: Fetch Branches from company_branches table ---
+  const { data: dbBranches = [] } = useQuery({
+    queryKey: ['companyBranches', currentCompany?.id],
+    queryFn: async () => {
+      if (!currentCompany?.id) return [];
+      return await getBranches(currentCompany.id);
+    },
+    enabled: !!currentCompany?.id
+  });
+
+  const activeBranches = React.useMemo(() => {
+    let branches = dbBranches.map(b => ({
+      id: b.id,
+      name: b.name_en,
+      nameAr: b.name_ar,
+      code: b.code,
+      coordinates: { lat: b.lat || 0, lng: b.lng || 0 },
+      isActive: b.is_active
+    }));
+
+    // NEW: Filter branches for non-admin users
+    if (!isAdmin && userBranchIds.length > 0) {
+      console.log('[Insights] Filtering branches for restricted user. Allowed:', userBranchIds);
+      branches = branches.filter(b =>
+        userBranchIds.includes(b.name) ||
+        userBranchIds.includes(b.id) ||
+        userBranchIds.includes(b.code)
+      );
+    }
+
+    return branches;
+  }, [dbBranches, isAdmin, userBranchIds]);
 
   // --- Server-Side Stats Fetching ---
+  // NEW: Include userBranchIds in query key and pass to RPC for filtering
   const { data: summary, isLoading: isCalculating } = useQuery({
-    queryKey: ['dashboardInsights', currentCompany?.id],
+    queryKey: ['dashboardInsights', currentCompany?.id, isAdmin ? 'all' : userBranchIds.join(',')],
     queryFn: async () => {
       if (!currentCompany?.id) return null;
-      return await getDashboardInsights(currentCompany.id);
+      // Pass branchIds for restricted users
+      const branchFilter = !isAdmin && userBranchIds.length > 0 ? userBranchIds : undefined;
+      console.log('[Insights] Fetching stats with branchFilter:', branchFilter);
+      return await getDashboardInsights(currentCompany.id, branchFilter);
     },
     enabled: !!currentCompany?.id,
-    staleTime: 1000 * 60 * 5 // Cache for 5 minutes
+    staleTime: 0 // Fetch every time to ensure fresh data during debugging
+  });
+
+  console.log('Insights Debug:', {
+    companyId: currentCompany?.id,
+    summary,
+    isCalculating,
+    activeBranchesLength: activeBranches.length,
+    firstBranchCoords: activeBranches[0]?.coordinates
   });
 
 
@@ -317,9 +366,13 @@ const InsightsDashboard: React.FC<InsightsDashboardProps> = (props) => {
 
 
         {/* Background Grid */}
-        <div className="absolute inset-0 pointer-events-none opacity-20"
-          style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, #334155 1px, transparent 0)', backgroundSize: '24px 24px' }}
-        />
+        <style>{`
+          .insights-grid-bg {
+            background-image: radial-gradient(circle at 1px 1px, #334155 1px, transparent 0);
+            background-size: 24px 24px;
+          }
+        `}</style>
+        <div className="absolute inset-0 pointer-events-none opacity-20 insights-grid-bg" />
 
         {/* 1. TOP ROW: KPI DECK (Exact Order 1-9) */}
         <div className="grid grid-cols-3 md:grid-cols-5 xl:grid-cols-9 gap-3 shrink-0 z-[60] relative">
@@ -364,7 +417,7 @@ const InsightsDashboard: React.FC<InsightsDashboardProps> = (props) => {
             <ReachCommandMap
               companyLocation={settings?.modules?.map?.defaultCenter || null}
               companyName={currentCompany?.name}
-              branches={settings?.common?.general?.branches || []}
+              branches={activeBranches}
               country={settings?.common?.general?.country || 'Saudi Arabia'}
             />
           </motion.div>

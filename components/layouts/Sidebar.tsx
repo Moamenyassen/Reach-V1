@@ -332,7 +332,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             </>
           )}
 
-          {!isLimbo && (
+          {!isLimbo && isAdmin && (
             <SidebarNavItem
               view={ViewMode.PRICING}
               icon={CreditCard}

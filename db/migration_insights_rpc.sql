@@ -1,5 +1,9 @@
--- Function to get dashboard stats DIRECTLY from the uploaded source of truth
--- This avoids loading 40k+ rows to frontend and ensures numbers match the upload screen.
+-- =====================================================
+-- RESTORE: Original Dashboard Stats RPC (Known Working)
+-- =====================================================
+-- The updated version with branch filtering caused issues.
+-- This restores the original simple version that was working.
+-- =====================================================
 CREATE OR REPLACE FUNCTION get_dashboard_stats_from_upload(p_company_id TEXT) RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE v_total_customers INT;
 v_active_routes INT;
@@ -56,7 +60,6 @@ health_stats AS (
 SELECT row_to_json(health_stats)::JSONB INTO v_route_health
 FROM health_stats;
 -- 4. Alerts (Basic checks on data quality)
--- For now, we assume 0 specific alerts unless we add logic to check Lat/Lng validity
 v_alerts := jsonb_build_object(
     'missingGps',
     0,
@@ -81,12 +84,10 @@ v_result := jsonb_build_object(
         v_avg_visits,
         'timePerUser',
         0,
-        -- Placeholder or calculate if Rep logic added
         'frequency',
         0,
-        -- Placeholder
         'efficiency',
-        100 -- Placeholder, assumed ideal
+        100
     ),
     'routeHealth',
     v_route_health,
@@ -96,3 +97,6 @@ v_result := jsonb_build_object(
 RETURN v_result;
 END;
 $$;
+-- Refresh schema
+NOTIFY pgrst,
+'reload schema';

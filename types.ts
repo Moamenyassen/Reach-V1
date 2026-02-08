@@ -449,13 +449,15 @@ export interface User {
   username: string;
   password: string;
   role: UserRole;
-  branchIds?: string[];
-  routeIds?: string[];
-  regionIds?: string[];
   isActive: boolean;
   lastLogin?: string; // ISO Date String
   id?: string;
   companyId?: string; // For Multi-Tenancy
+  // Managed Entities
+  regionIds?: string[];
+  branchIds?: string[];
+  routeIds?: string[];
+  repCodes?: string[];
   // New Onboarding Fields
   firstName?: string;
   lastName?: string;
@@ -489,6 +491,8 @@ export enum ViewMode {
 export interface BranchConfig {
   id: string; // UUID or unique slug
   name: string;
+  code?: string;
+  nameAr?: string;
   coordinates?: { lat: number; lng: number };
   address?: string;
   isActive: boolean;

@@ -247,7 +247,10 @@ export const updateUserProfile = async (updates: Partial<User>): Promise<User> =
       first_name: updates.firstName,
       last_name: updates.lastName,
       phone: updates.phone,
-      branch_ids: updates.branchIds
+      branch_ids: updates.branchIds,
+      route_ids: updates.routeIds,
+      region_ids: updates.regionIds,
+      rep_codes: updates.repCodes
     })
     .eq('auth_user_id', authUser.user.id)
     .select()
@@ -302,6 +305,9 @@ const mapProfileToUser = (profile: any): User => ({
   isActive: profile.isActive ?? true,
   companyId: profile.companyId,
   branchIds: profile.branchIds || [],
+  routeIds: profile.routeIds || [],
+  regionIds: profile.regionIds || [],
+  repCodes: profile.repCodes || [],
   lastLogin: profile.lastLogin,
   firstName: profile.firstName,
   lastName: profile.lastName,
@@ -317,6 +323,9 @@ const mapRowToUser = (row: any): User => ({
   isActive: row.is_active ?? true,
   companyId: row.company_id,
   branchIds: row.branch_ids || [],
+  routeIds: row.route_ids || [],
+  regionIds: row.region_ids || [],
+  repCodes: row.rep_codes || [],
   lastLogin: row.last_login,
   firstName: row.first_name,
   lastName: row.last_name,

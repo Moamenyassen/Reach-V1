@@ -413,10 +413,9 @@ export const fetchCompanyCustomers = async (companyId: string, onProgress?: (cur
 
     // 2. Get Total Count
     const { count, error: countError } = await supabase
-        .from('customers')
+        .from('normalized_customers')
         .select('*', { count: 'exact', head: true })
-        .eq('company_id', companyId)
-        .eq('version_id', versionId);
+        .eq('company_id', companyId);
 
     if (countError) {
         console.error('Error counting company routes:', countError);
@@ -433,10 +432,9 @@ export const fetchCompanyCustomers = async (companyId: string, onProgress?: (cur
     for (let from = 0; from < count; from += BATCH_SIZE) {
         const to = from + BATCH_SIZE - 1;
         const { data, error } = await supabase
-            .from('customers')
+            .from('normalized_customers')
             .select('*')
             .eq('company_id', companyId)
-            .eq('version_id', versionId)
             .range(from, to);
 
         if (error) {
@@ -549,15 +547,26 @@ export const fetchCustomers = async (
     pageSize: number = 50,
     filters?: { search?: string; region?: string; alert?: string; source?: string },
     sortBy: string = 'name',
-    ascending: boolean = true
+    ascending: boolean = true,
+    userBranchIds?: string[] // NEW: Filter by user's assigned branches (for non-admin users)
 ): Promise<{ data: Customer[]; count: number }> => {
+
+    // DEBUG: Log branch filtering parameters
+    console.log('[fetchCustomers] Called with params:', {
+        companyId,
+        page,
+        pageSize,
+        filters,
+        userBranchIds,
+        userBranchIdsLength: userBranchIds?.length
+    });
 
     // Normalized Query: Join with branches for filter/display, AND route_visits for schedule info
     let query = supabase
         .from('normalized_customers')
         .select(`
             *, 
-            branches:branch_id(code, name_en, name_ar),
+            branches:company_branches!branch_id(code, name_en, name_ar),
             visits:route_visits(
                 week_number, 
                 day_name, 
@@ -567,7 +576,53 @@ export const fetchCustomers = async (
         .eq('company_id', companyId)
         .eq('is_active', true);
 
-    // 2. Apply Filters
+    // 2. Apply Branch Restriction (for non-admin users)
+    // userBranchIds can contain branch NAMES (legacy) or branch CODES (preferred)
+    if (userBranchIds && userBranchIds.length > 0) {
+        console.log('[fetchCustomers] Applying branch filter for:', userBranchIds);
+
+        // Step 1: Get the actual branch UUIDs - match by BOTH code and name_en for flexibility
+        const { data: branchData, error: branchError } = await supabase
+            .from('company_branches')
+            .select('id, code, name_en')
+            .eq('company_id', companyId);
+
+        if (branchError) {
+            console.error('[fetchCustomers] Error fetching branch IDs:', branchError);
+            return { data: [], count: 0 };
+        }
+
+        // Match branches where code OR name_en is in userBranchIds
+        const matchedBranches = branchData?.filter(b =>
+            userBranchIds.includes(b.code) || userBranchIds.includes(b.name_en)
+        ) || [];
+
+        const branchUUIDs = matchedBranches.map(b => b.id);
+        console.log('[fetchCustomers] Resolved branch UUIDs:', branchUUIDs, 'from branches:', matchedBranches);
+
+        if (branchUUIDs.length === 0) {
+            console.warn('[fetchCustomers] No matching branches found for:', userBranchIds);
+            return { data: [], count: 0 };
+        }
+
+        // Step 2: Filter customers by the actual branch_id column
+        query = supabase
+            .from('normalized_customers')
+            .select(`
+                *, 
+                branches:company_branches!branch_id(code, name_en, name_ar),
+                visits:route_visits(
+                    week_number, 
+                    day_name, 
+                    routes:route_id(name)
+                )
+            `, { count: 'exact' })
+            .eq('company_id', companyId)
+            .eq('is_active', true)
+            .in('branch_id', branchUUIDs);
+    }
+
+    // 3. Apply Filters
     if (filters?.search) {
         const s = filters.search;
         // Search across fields
@@ -581,7 +636,7 @@ export const fetchCustomers = async (
             .from('normalized_customers')
             .select(`
                 *, 
-                branches!inner(code, name_en, name_ar),
+                branches:company_branches!inner(code, name_en, name_ar),
                 visits:route_visits(
                     week_number, 
                     day_name, 
@@ -591,6 +646,15 @@ export const fetchCustomers = async (
             .eq('company_id', companyId)
             .eq('is_active', true)
             .eq('branches.name_en', filters.region);
+
+        // Also apply branch restriction if user has limited access
+        if (userBranchIds && userBranchIds.length > 0) {
+            // Ensure selected region is within user's allowed branches
+            if (!userBranchIds.includes(filters.region)) {
+                // User trying to access region they don't have access to - return empty
+                return { data: [], count: 0 };
+            }
+        }
 
         // Re-apply search
         if (filters?.search) {
@@ -620,6 +684,16 @@ export const fetchCustomers = async (
     query = query.range(from, to);
 
     const { data, count, error } = await query;
+
+    console.log('Fetch Customers Debug:', {
+        companyId,
+        page,
+        filters,
+        count,
+        error,
+        dataLength: data?.length,
+        firstRow: data?.[0]
+    });
 
     if (error) {
         console.error('Error fetching customers:', error);
@@ -750,7 +824,7 @@ export const saveCompanyCustomersFromSysAdmin = async (
                 data: {} // Store any extra fields
             }));
 
-            const { error } = await supabase.from('customers').insert(rows);
+            const { error } = await supabase.from('normalized_customers').upsert(rows);
             if (error) {
                 console.error('Batch insert error:', error);
                 throw new Error(`Insert failed: ${error.message}`);
@@ -786,6 +860,14 @@ export const saveCompanyCustomersFromSysAdmin = async (
                 regions: []
             }
         });
+
+        // 5. Auto-Detect Branches (NEW)
+        try {
+            console.log('Triggering auto-branch detection for version:', versionId);
+            await detectAndAddBranches(companyId, versionId);
+        } catch (branchError) {
+            console.warn("Auto-detect branches failed (non-fatal):", branchError);
+        }
 
         return { added: addedCount, skipped: 0, versionId };
     } catch (err: any) {
@@ -1297,6 +1379,7 @@ const mapRowToUser = (row: any): User => {
         branchIds: row.branch_ids || [],
         routeIds: row.route_ids || [],
         regionIds: row.region_ids || [],
+        repCodes: row.rep_codes || [],
         lastLogin: row.last_login,
         // New Onboarding Fields
         firstName: row.first_name,
@@ -1318,6 +1401,7 @@ const mapUserToRow = (u: User) => ({
     branch_ids: u.branchIds,
     route_ids: u.routeIds,
     region_ids: u.regionIds,
+    rep_codes: u.repCodes,
     last_login: u.lastLogin,
     // New Onboarding Fields
     first_name: u.firstName,
@@ -1490,7 +1574,7 @@ export const forceDeleteCompany = async (companyId: string) => {
     if (usersError) throw new Error("Failed to delete users: " + usersError.message);
 
     // 2. Delete Customers
-    const { error: custError } = await supabase.from('customers').delete().eq('company_id', companyId);
+    const { error: custError } = await supabase.from('normalized_customers').delete().eq('company_id', companyId);
     if (custError) throw new Error("Failed to delete customers: " + custError.message);
 
     // 3. Delete Routes (Meta) - Versions usually cascade or we delete them if linked to meta
@@ -1614,7 +1698,7 @@ export const subscribeToSystemMetadata = (companyId: string, callback: (data: { 
  * Selects only: id, clientCode, regionDescription, routeName, day, lat, lng, branch
  */
 export const fetchLightCustomers = async (companyId: string, versionId: string) => {
-    const { data, error } = await supabase.from('customers')
+    const { data, error } = await supabase.from('normalized_customers')
         .select('id, name, lat, lng, day, client_code, route_name, week, region_description, region_code, reach_customer_code, branch')
         .eq('company_id', companyId)
         .eq('version_id', versionId);
@@ -1641,7 +1725,7 @@ export const subscribeToRoutes = (companyId: string, callback: (customers: Custo
 
         // 1. Get Total Count
         const { count, error: countError } = await supabase
-            .from('customers')
+            .from('normalized_customers')
             .select('*', { count: 'exact', head: true })
             .eq('company_id', companyId)
             .eq('version_id', versionId);
@@ -1672,11 +1756,10 @@ export const subscribeToRoutes = (companyId: string, callback: (customers: Custo
         const fetchPage = async (pageIndex: number) => {
             const from = pageIndex * BATCH_SIZE;
             const to = from + BATCH_SIZE - 1;
-            const { data, error } = await supabase.from('customers')
+            const { data, error } = await supabase.from('normalized_customers')
                 // Reverted to SAFE columns only. Removed: name_ar, district, vat, buyer_id, store_type, reach_customer_code, addedBy
-                .select('id, name, lat, lng, day, client_code, route_name, week, region_description, region_code, branch, classification, user_code, address, phone, created_at')
+                .select('id, name_en, lat, lng, client_code, route_name, branch_id, classification, address, phone, created_at')
                 .eq('company_id', companyId)
-                .eq('version_id', versionId)
                 .range(from, to);
 
             if (error) throw error;
@@ -1830,7 +1913,7 @@ export const fetchCompanyBranches = async (companyId: string, regionFilter?: str
     // Legacy mapping: Region = Branch Name.
 
     const { data, error } = await supabase
-        .from('branches')
+        .from('company_branches')
         .select('name_en')
         .eq('company_id', companyId)
         .eq('is_active', true);
@@ -1848,18 +1931,13 @@ export const fetchCompanyRoutes = async (companyId: string, branchFilter?: strin
     // Correctly query the 'routes' table
     let query = supabase
         .from('routes')
-        .select(`name, branches!inner(name_en)`) // Join branches to filter by name
+        .select(`id, name, company_branches!inner(name_en)`) // Join branches to filter by name
         .eq('company_id', companyId)
         .eq('is_active', true);
 
-    if (branchFilter && branchFilter.length > 0) {
+    if (branchFilter && branchFilter.length > 0 && !branchFilter.includes('All')) {
         // Filter by the joined branch name
-        // Supabase PostgREST syntax for filtering on joined column
-        // We iterate and filter if strictly needed, or use the inner join filter.
-        // For simple equality on foreign table:
-        // .eq('branches.name_en', val) works if !inner is used.
-        // Since branchFilter might be array, we use .in()
-        query = query.in('branches.name_en', branchFilter);
+        query = query.in('company_branches.name_en', branchFilter);
     }
 
     const { data, error } = await query;
@@ -1869,9 +1947,45 @@ export const fetchCompanyRoutes = async (companyId: string, branchFilter?: strin
         return [];
     }
 
-    // Map correctly
+    // Map correctly to unique names for dropdown, but keep internal ID usage if needed later
     const uniqueRoutes = Array.from(new Set(data?.map((row: any) => row.name).filter(Boolean)));
     return uniqueRoutes.map(r => ({ routeName: r }));
+};
+
+export const fetchCompanyReps = async (companyId: string, branchFilter?: string[], routeFilter?: string[]) => {
+    // 1. Get branch internal IDs from names if branchFilter is provided
+    let branchIds: string[] = [];
+    if (branchFilter && branchFilter.length > 0) {
+        const { data: dbBranches } = await supabase
+            .from('company_branches')
+            .select('id')
+            .eq('company_id', companyId)
+            .in('name_en', branchFilter);
+        branchIds = dbBranches?.map(b => b.id) || [];
+    }
+
+    // 2. Query normalized_reps
+    let query = supabase
+        .from('normalized_reps')
+        .select('*')
+        .eq('company_id', companyId)
+        .eq('is_active', true);
+
+    if (branchIds.length > 0) {
+        query = query.in('branch_id', branchIds);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+        console.error("Error fetching reps:", error);
+        return [];
+    }
+
+    return data.map((r: any) => ({
+        userCode: r.user_code,
+        name: r.name
+    }));
 };
 
 // Helper to fetch unique strings and their counts for filters
@@ -1945,6 +2059,11 @@ export const fetchFilteredRoutes = async (companyId: string, versionId: string, 
         .select('*')
         .eq('company_id', companyId);
 
+    // Apply version filter if provided and not the legacy placeholder
+    if (versionId && versionId !== 'active_routes' && versionId !== 'all') {
+        rawQuery = rawQuery.eq('version_id', versionId);
+    }
+
     // Apply SQL-level filters (exact match - since dropdowns come from same table)
     if (filters.region && filters.region !== 'All' && filters.region.length > 0) {
         if (Array.isArray(filters.region)) {
@@ -1994,13 +2113,20 @@ export const fetchFilteredRoutes = async (companyId: string, versionId: string, 
         return [];
     }
 
-    if (!rawData || rawData.length === 0) {
-        console.warn('[fetchFilteredRoutes] No data found with these filters.');
-        console.warn('Filters applied:', filters);
-        return [];
-    }
+    if (!rawData || rawData.length === 0) return [];
 
-    console.info(`[fetchFilteredRoutes] Found ${rawData.length} rows.`);
+    // 3. DEDUPLICATION (Safety Valve)
+    // If multiple rows exist for same client in same version (e.g. bad upload logic), 
+    // we must deduplicate to prevent stacked pins on map (even-only pin issue).
+    const seen = new Set<string>();
+    const uniqueData = rawData.filter(row => {
+        const key = row.client_code || `${row.name}_${Number(row.lat).toFixed(4)}_${Number(row.lng).toFixed(4)}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+
+    console.info(`[fetchFilteredRoutes] Found ${rawData.length} rows, ${uniqueData.length} after deduplication.`);
 
     // Pagination (Manual)
     if (pageSize !== -1) {
@@ -2010,50 +2136,94 @@ export const fetchFilteredRoutes = async (companyId: string, versionId: string, 
     }
 
     console.info(`[fetchFilteredRoutes] Returning ${rawData.length} rows.`);
-    return rawData.map((row: any) => ({
-        id: row.id,
-        companyId: row.company_id,
-        name: row.customer_name_en || row.name,
-        nameAr: row.customer_name_ar || row.name_ar,
-        lat: row.lat,
-        lng: row.lng,
-
-        // Mapped Fields
-        branch: row.branch_name,
-        regionCode: row.branch_code || row.branch_name,
-        regionDescription: row.region || row.branch_name,
-
-        routeName: row.route_name,
-        userCode: row.rep_code || row.user_code,
-
-        // Visit Specifics
-        week: row.week_number || row.week,
-        day: row.day_name || row.day,
-        visitOrder: 0,
-
-        visits: [{
-            week_number: row.week_number || row.week,
-            day_name: row.day_name || row.day,
-            visit_order: 0,
-            routes: {
-                name: row.route_name,
-                user_code: row.rep_code || row.user_code
-            }
-        }],
-
-        // Standard Fields
-        clientCode: row.client_code,
-        address: row.address,
-        phone: row.phone,
-        classification: row.classification,
-        vat: row.vat,
-        district: row.district,
-        storeType: row.store_type,
-        buyerId: row.buyer_id,
-        reachCustomerCode: row.client_code
-    }));
-
+    return rawData.map(mapRowToCustomer);
 };
+
+/**
+ * NEW: Fetches route data from the Normalized Schema (route_visits -> normalized_customers).
+ * This is much faster and more accurate for production data.
+ */
+export const fetchRouteCustomersNormalized = async (
+    companyId: string,
+    filters: {
+        region?: string[],
+        route?: string[],
+        week?: string[],
+        day?: string[]
+    }
+): Promise<Customer[]> => {
+    console.info(`[fetchRouteCustomersNormalized] Fetching for Company: ${companyId}`, filters);
+
+    let query = supabase
+        .from('route_visits')
+        .select(`
+            id, visit_order, week_number, day_name,
+            routes!inner (name, company_branches!inner (name_en)),
+            normalized_customers!inner (*)
+        `)
+        .eq('company_id', companyId);
+
+    // Filter by Branch (Region)
+    if (filters.region && filters.region.length > 0 && !filters.region.includes('All')) {
+        query = query.in('routes.company_branches.name_en', filters.region);
+    }
+
+    // Filter by Route
+    if (filters.route && filters.route.length > 0 && !filters.route.includes('All')) {
+        query = query.in('routes.name', filters.route);
+    }
+
+    // Filter by Week
+    if (filters.week && filters.week.length > 0 && !filters.week.includes('All')) {
+        query = query.in('week_number', filters.week);
+    }
+
+    // Filter by Day
+    if (filters.day && filters.day.length > 0 && !filters.day.includes('All')) {
+        query = query.in('day_name', filters.day);
+    }
+
+    const { data, error } = await query.order('visit_order', { ascending: true });
+
+    if (error) {
+        console.error('[fetchRouteCustomersNormalized] Error:', error);
+        throw error;
+    }
+
+    if (!data || data.length === 0) return [];
+
+    // Map Normalized schema back to Customer interface for UI compatibility
+    return data.map((v: any) => {
+        const c = v.normalized_customers;
+        const r = v.routes;
+        return {
+            id: c.id,
+            name: c.name_en || c.name_ar || 'Unnamed Customer',
+            lat: c.lat,
+            lng: c.lng,
+            day: v.day_name || 'Unscheduled',
+            clientCode: c.client_code,
+            routeName: r?.name,
+            address: c.address,
+            week: v.week_number,
+            regionCode: r?.company_branches?.name_en,
+            nameAr: c.name_ar,
+            addedDate: c.created_at,
+            rowId: v.id,
+
+            // Extended
+            branch: r?.company_branches?.name_en,
+            phone: c.phone,
+            district: c.district,
+            vat: c.vat,
+            buyerId: c.buyer_id,
+            classification: c.classification,
+            storeType: c.store_type,
+            visitOrder: v.visit_order
+        } as Customer;
+    });
+};
+
 
 export const updateCustomer = async (companyId: string, customer: Customer) => {
     if (!customer.rowId) throw new Error("Missing row ID for update");
@@ -2090,7 +2260,7 @@ export const updateCustomer = async (companyId: string, customer: Customer) => {
 
     // We can't partial update JSONB easily without raw SQL or fetching first.
     // Fetch current to merge JSONB
-    const { data: current, error: fetchError } = await supabase.from('customers')
+    const { data: current, error: fetchError } = await supabase.from('normalized_customers')
         .select('data')
         .eq('id', customer.rowId)
         .single();
@@ -2099,7 +2269,7 @@ export const updateCustomer = async (companyId: string, customer: Customer) => {
 
     const newData = { ...current.data, ...dataUpdate };
 
-    const { error } = await supabase.from('customers')
+    const { error } = await supabase.from('normalized_customers')
         .update({
             ...rowUpdate,
             data: newData
@@ -2206,51 +2376,51 @@ export const addCustomerFromScanner = async (companyId: string, customerData: Pa
         }
     }
 
-    // 3. Prepare the row
+    // 4. Insert the customer into company_uploaded_data
+    // We map the "Scanner" fields to the "Upload" schema
     const row = {
         company_id: companyId,
-        version_id: versionId,
-        customer_id: customerId,
-        name: enrichedData.name || 'New Customer',
-        name_ar: enrichedData.nameAr || '',
+        // version_id: versionId, // company_uploaded_data might not use version_id directly like this, or it's part of the unique key? 
+        // Checking schema via inference: usually company_uploaded_data is the raw source. 
+        // Let's use the standard columns we know exist.
+
+        client_code: enrichedData.clientCode || `SC-${Date.now().toString(36).toUpperCase()}`,
+        customer_name_en: enrichedData.name || 'New Customer',
+        customer_name_ar: enrichedData.nameAr || enrichedData.name || '',
+
         lat: enrichedData.lat || 0,
         lng: enrichedData.lng || 0,
-        address: enrichedData.address || '',
+
+        // Address / Location
+        customer_address_1: enrichedData.address || '',
         district: enrichedData.district || '',
-        customer_address: enrichedData.address || '',
-        client_code: enrichedData.clientCode || `SC-${Date.now().toString(36).toUpperCase()}`,
-        route_name: enrichedData.routeName || '',
         region_code: enrichedData.regionCode || '',
-        region_description: enrichedData.regionDescription || '',
-        branch: enrichedData.branch || '',
+        // region_description: enrichedData.regionDescription || '', // check if this column exists, otherwise omit
+
+        // Route Info
+        route_name: enrichedData.routeName || 'Unassigned',
+        branch_code: enrichedData.branch || 'Main', // Default branch if unknown
+
+        // Contact
         phone: enrichedData.phone || '',
-        vat: enrichedData.vat || '',
-        buyer_id: enrichedData.buyerId || '',
+        vat_number: enrichedData.vat || '',
+
+        // Classification
         classification: enrichedData.classification || '',
         store_type: enrichedData.storeType || '',
-        day: enrichedData.day || '',
-        week: enrichedData.week || '',
-        data: {
-            // Keep extra fields in JSONB
-            addedBy: 'Opportunity Scanner',
-            addedDate: new Date().toISOString(),
-            // Sync these for redundancy if needed, though dedicated columns are preferred
-            day: enrichedData.day || '',
-            week: enrichedData.week || '',
-            nameAr: enrichedData.nameAr || '',
-            branch: enrichedData.branch || '',
-            phone: enrichedData.phone || '',
-            district: enrichedData.district || '',
-            vat: enrichedData.vat || '',
-            buyerId: enrichedData.buyerId || '',
-            classification: enrichedData.classification || '',
-            storeType: enrichedData.storeType || ''
-        }
+
+        // Visit Schedule
+        day_name: enrichedData.day || 'Sunday', // Default valid day
+        week_number: enrichedData.week || 'Week 1', // Default valid week
+
+        // Metadata / Flags
+        is_active: true,
+        source: 'Opportunity Scanner',
+        upload_batch_id: `SCANNER_${Date.now()}` // Artificial batch ID to distinguish
     };
 
-    // 4. Insert the customer
     const { data: insertedData, error: insertError } = await supabase
-        .from('customers')
+        .from('company_uploaded_data')
         .insert(row)
         .select()
         .single();
@@ -2260,7 +2430,31 @@ export const addCustomerFromScanner = async (companyId: string, customerData: Pa
     }
 
     // 5. Return the new customer in the app's Customer format
-    return mapRowToCustomer(insertedData);
+    // We need to map the returned row back to our Customer interface
+    return {
+        id: insertedData.id,
+        companyId: insertedData.company_id,
+        name: insertedData.customer_name_en,
+        nameAr: insertedData.customer_name_ar,
+        lat: insertedData.lat,
+        lng: insertedData.lng,
+        address: insertedData.customer_address_1,
+        district: insertedData.district,
+        regionCode: insertedData.region_code,
+        routeName: insertedData.route_name,
+        branch: insertedData.branch_code,
+        phone: insertedData.phone,
+        vat: insertedData.vat_number,
+        classification: insertedData.classification,
+        storeType: insertedData.store_type,
+        day: insertedData.day_name,
+        week: insertedData.week_number,
+        clientCode: insertedData.client_code,
+        data: {
+            addedBy: 'Opportunity Scanner',
+            addedDate: new Date().toISOString()
+        }
+    } as Customer;
 };
 
 export const saveRouteData = async (
@@ -2440,7 +2634,7 @@ export const saveRouteData = async (
             }
         }));
 
-        const { error } = await supabase.from('customers').insert(rows);
+        const { error } = await supabase.from('normalized_customers').upsert(rows);
         if (error) throw new Error(`Batch insert failed: ${error.message} `);
 
         // REACH LEADS CAPTURE (Global DB)
@@ -2633,7 +2827,7 @@ export const deleteHistoryLog = async (companyId: string, versionId: string) => 
 
         // Try to clean up legacy 'customers' table just in case (optional, non-blocking)
         try {
-            await supabase.from('customers').delete().eq('company_id', companyId).eq('version_id', versionId);
+            await supabase.from('normalized_customers').delete().eq('company_id', companyId);
         } catch (ignored) { }
 
         // Delete History Log
@@ -2719,10 +2913,9 @@ export const fetchUniqueRoutes = async (companyId: string, versionId: string): P
     // Actually, we can use `.select('route_name')` and filter in JS, but better:
 
     const { data, error } = await supabase
-        .from('customers')
+        .from('normalized_customers')
         .select('route_name')
-        .eq('company_id', companyId)
-        .eq('version_id', versionId);
+        .eq('company_id', companyId);
 
     if (error || !data) return [];
 
@@ -2780,128 +2973,23 @@ export const detectAndAddBranches = async (companyId: string, specificVersionId?
     try {
         console.log("Starting branch detection for", companyId, specificVersionId ? `(Version: ${specificVersionId})` : "(Fetching Active Version)");
 
-        let activeVersionId = specificVersionId;
+        // 1. Call RPC to detect and upsert branches server-side
+        const { data: detectedBranches, error: rpcError } = await supabase.rpc('detect_and_upsert_branches', {
+            p_company_id: companyId,
+            p_version_id: specificVersionId || null
+        });
 
-        if (!activeVersionId) {
-            // Fetch active version to ensure we scan the latest uploaded file
-            const { data: meta, error: metaError } = await supabase
-                .from('route_meta')
-                .select('active_version_id')
-                .eq('company_id', companyId)
-                .single();
-
-            if (metaError) console.error("Meta fetch error:", metaError);
-            activeVersionId = meta?.active_version_id;
+        if (rpcError) {
+            console.error("RPC detect_and_upsert_branches failed:", rpcError);
+            // Fallback? No, this is critical for optimization. Throw or return empty.
+            throw rpcError;
         }
 
-        console.log("Debug: Scanning active version:", activeVersionId || "All History");
+        console.log(`[RPC] Detected & Upserted ${detectedBranches?.length || 0} branches.`);
 
-        // Use a Map to track sums for centroid calculation
-        // Key: Branch/Region Name (normalized) -> Value: { originalName, latSum, lngSum, count }
-        const branchMap = new Map<string, { originalName: string, latSum: number, lngSum: number, count: number }>();
-        const detectedCodes = new Set<string>();
+        if (!detectedBranches || detectedBranches.length === 0) return [];
 
-        const CHUNK_SIZE = 50000;
-        let offset = 0;
-        let hasMore = true;
-        let loopSafety = 0;
-
-        while (hasMore && loopSafety < 50) { // Safety limit
-            console.log(`Debug: Fetching chunk: ${offset} - ${offset + CHUNK_SIZE}`);
-
-            // Fetch region_description AND coordinates
-            let query = supabase
-                .from('customers')
-                .select('region_description,region_code,lat,lng')
-                .eq('company_id', companyId)
-                .range(offset, offset + CHUNK_SIZE - 1);
-
-            if (activeVersionId) {
-                query = query.eq('version_id', activeVersionId);
-            }
-
-            // Using CSV format for efficiency
-            const { data: routeCsv, error: routeError } = await query.csv();
-
-            if (routeError) {
-                console.error("Error fetching chunk:", routeError);
-                throw routeError;
-            }
-
-            const lines = (routeCsv as any).split('\n');
-            // Remove header if present (Supabase .csv() includes header)
-            if (lines.length > 0 && lines[0].includes('region_description')) {
-                lines.shift();
-            }
-
-            if (lines.length === 0 || (lines.length === 1 && lines[0] === '')) {
-                hasMore = false;
-            } else {
-                lines.forEach((line: string) => {
-                    // Simple CSV parsing for 4 columns "desc,code,lat,lng"
-                    // Note: Supabase CSV string values might be quoted
-                    const parts = line.split(',');
-
-                    const clean = (s: string) => {
-                        if (!s) return '';
-                        let val = s.trim();
-                        if (val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1);
-                        return val.replace(/""/g, '"');
-                    };
-
-                    const desc = clean(parts[0]);
-                    const code = parts.length > 1 ? clean(parts[1]) : '';
-                    // Parse Coordinates safely
-                    const lat = parseFloat(clean(parts[2]));
-                    const lng = parseFloat(clean(parts[3]));
-
-                    if (desc && desc.toLowerCase() !== 'null' && desc.toLowerCase() !== 'undefined' && desc.length > 0) {
-                        const key = desc.trim().toLowerCase();
-                        const current = branchMap.get(key) || { originalName: desc.trim(), latSum: 0, lngSum: 0, count: 0 };
-
-                        // Only add valid coordinates to centroid calculation
-                        if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
-                            current.latSum += lat;
-                            current.lngSum += lng;
-                            current.count += 1;
-                        }
-                        // Always increment count/update existence? No, stick to ones with geo for now or just generic exists
-                        // Actually, we want to save the branch even if no coords exist (fallback)
-                        if (current.count === 0 && (isNaN(lat) || isNaN(lng))) {
-                            // Mark as existing but without adding to sum
-                        }
-
-                        branchMap.set(key, current);
-                    }
-
-                    if (code && code.toLowerCase() !== 'null' && code.toLowerCase() !== 'undefined' && code.length > 0) {
-                        detectedCodes.add(code);
-                    }
-                });
-
-                if (lines.length < CHUNK_SIZE) {
-                    hasMore = false;
-                }
-
-                offset += CHUNK_SIZE;
-            }
-            loopSafety++;
-        }
-
-        const distinctBranches = Array.from(branchMap.values()).map(v => v.originalName);
-
-        // Fallback: If descriptions are missing, append codes that are not covered
-        // Note: Codes won't have centroids calculated here easily unless we mapped them too, 
-        // but typically 'region_description' is the main grouping.
-        if (distinctBranches.length === 0 && detectedCodes.size > 0) {
-            console.log("Fallback: using branch codes as descriptions missing");
-            detectedCodes.forEach(c => distinctBranches.push(c));
-        }
-
-        console.log("Detected branches:", distinctBranches);
-
-        if (distinctBranches.length === 0) return [];
-
+        // --- LEGACY: Update companies.settings for Backward Comp ---
         // 2. Get current settings
         const { data: company, error: companyError } = await supabase
             .from('companies')
@@ -2916,57 +3004,32 @@ export const detectAndAddBranches = async (companyId: string, specificVersionId?
         const currentBranchConfigs = currentSettings?.common?.general?.branches || [];
 
         // 3. Merge
-        // Check against both legacy list and new config list
         const existingNames = new Set([
             ...currentBranches.map(b => b.trim().toLowerCase()),
             ...currentBranchConfigs.map(b => b.name.trim().toLowerCase())
         ]);
 
-        // Filter for NEW branches only
-        const newBranchData = Array.from(branchMap.values()).filter(b => !existingNames.has(b.originalName.toLowerCase()));
+        // Filter for NEW branches only (by name)
+        // RPC returns { code, name, is_new, customer_count }
+        const newBranchData = detectedBranches.filter((b: any) => !existingNames.has(b.name.trim().toLowerCase()));
 
-        // Also add any codes that were added via fallback and not in map (edge case)
-        const mappedNames = new Set(newBranchData.map(b => b.originalName));
-        const extraNames = distinctBranches.filter(name => !mappedNames.has(name) && !existingNames.has(name.toLowerCase()));
+        if (newBranchData.length === 0) return []; // Nothing to update in settings
 
-        if (newBranchData.length === 0 && extraNames.length === 0) return []; // Nothing to update
+        // Update Legacy Lists
+        const newNames = newBranchData.map((b: any) => b.name);
+        const updatedLegacyBranches = [...currentBranches, ...newNames];
 
-        // Update Legacy
-        const allNewNames = [...newBranchData.map(b => b.originalName), ...extraNames];
-        const updatedLegacyBranches = [...currentBranches, ...allNewNames];
-
-        // Update New Config
-        const newConfigs: BranchConfig[] = [];
-
-        // Add Map-based branches (with centroids)
-        newBranchData.forEach(item => {
-            const config: BranchConfig = {
-                id: crypto.randomUUID(),
-                name: item.originalName,
-                isActive: true
-            };
-
-            // Calculate Centroid if valid data exists
-            if (item.count > 0) {
-                config.coordinates = {
-                    lat: item.latSum / item.count,
-                    lng: item.lngSum / item.count
-                };
-                // Fallback address label
-                config.address = `Auto-detected (Centroid of ${item.count} customers)`;
-            }
-
-            newConfigs.push(config);
-        });
-
-        // Add pure-name branches (from codes/fallback)
-        extraNames.forEach(name => {
-            newConfigs.push({
-                id: crypto.randomUUID(),
-                name: name,
-                isActive: true
-            });
-        });
+        // Update New Config List
+        const newConfigs: BranchConfig[] = newBranchData.map((item: any) => ({
+            id: crypto.randomUUID(),
+            name: item.name,
+            isActive: true,
+            // We don't get lat/lng back from RPC in this simplified return, 
+            // but we could if needed. For now, we assume settings don't strictly need centroids immediately 
+            // or we could update RPC to return them.
+            // Let's assume undefined for now as it's legacy config.
+            address: `Auto-detected (${item.customer_count} customers)`
+        }));
 
         const updatedBranchConfigs = [...currentBranchConfigs, ...newConfigs];
 
@@ -2974,9 +3037,9 @@ export const detectAndAddBranches = async (companyId: string, specificVersionId?
         const updatedSettings: CompanySettings = {
             ...currentSettings,
             common: {
-                ...currentSettings?.common,
+                ...currentSettings.common,
                 general: {
-                    ...currentSettings?.common?.general,
+                    ...currentSettings.common.general,
                     allowedBranches: updatedLegacyBranches,
                     branches: updatedBranchConfigs
                 }
@@ -2991,9 +3054,10 @@ export const detectAndAddBranches = async (companyId: string, specificVersionId?
         if (updateError) throw updateError;
 
         return newConfigs;
-    } catch (e) {
-        console.error("Detect Branches Failed:", e);
-        throw e;
+
+    } catch (error) {
+        console.error("Branch detection failed:", error);
+        return [];
     }
 };
 
@@ -3323,7 +3387,7 @@ export const registerGlobalUser = async (userData: {
                 last_name: userData.lastName,
                 role: 'ADMIN', // Default to Admin of their future company
                 is_active: true,
-                is_registered_customer: true,
+                // is_registered_customer: true, // Requires 'migration_recent_features.sql'
                 // company_id is NULL initially (Limbo State)
             }])
             .select()
@@ -3600,7 +3664,7 @@ export const getReachCustomerStatus = async (userId: string): Promise<string | n
             return 'LICENSE_REQUEST';
         }
 
-        // 2. Fallback to Customer Profile Status
+        // 2. Fallback to Customer Profile Status (uses App User ID)
         const { data } = await supabase
             .from('reach_customers')
             .select('status')
@@ -3718,7 +3782,7 @@ export const updateReachCustomerNotes = async (customerId: string, notes: string
 export const fetchRouteHealth = async (companyId: string, filters?: any) => {
     // 1. Get All Customers for Company (Lightweight)
     let query = supabase
-        .from('customers')
+        .from('normalized_customers')
         .select('*')
         .eq('company_id', companyId);
 
@@ -3818,13 +3882,17 @@ export const fetchRouteHealth = async (companyId: string, filters?: any) => {
 };
 
 // --- Dashboard Insights (Server-Side Calculation) ---
-export const getDashboardInsights = async (companyId: string): Promise<DashboardInsights | null> => {
+export const getDashboardInsights = async (
+    companyId: string,
+    branchIds?: string[]  // NEW: For restricted user filtering
+): Promise<DashboardInsights | null> => {
     try {
-        console.log('[Dashboard] Fetching stats for company:', companyId);
+        console.log('[Dashboard] Fetching stats for company:', companyId, 'branchIds:', branchIds);
 
         // Use the new optimized RPC function that queries company_uploaded_data directly
         const { data, error } = await supabase.rpc('get_dashboard_stats_from_upload', {
-            p_company_id: companyId
+            p_company_id: companyId,
+            p_branch_ids: branchIds && branchIds.length > 0 ? branchIds : null
         });
 
         console.log('[Dashboard] RPC Response:', { data, error });
@@ -3856,7 +3924,7 @@ export const getDashboardInsights = async (companyId: string): Promise<Dashboard
 
 export const getBranches = async (companyId: string): Promise<NormalizedBranch[]> => {
     const { data, error } = await supabase
-        .from('branches')
+        .from('company_branches')
         .select('*')
         .eq('company_id', companyId)
         .order('name_en', { ascending: true });
@@ -3867,7 +3935,7 @@ export const getBranches = async (companyId: string): Promise<NormalizedBranch[]
 
 export const getBranchByCode = async (companyId: string, code: string): Promise<NormalizedBranch | null> => {
     const { data, error } = await supabase
-        .from('branches')
+        .from('company_branches')
         .select('*')
         .eq('company_id', companyId)
         .eq('code', code)
@@ -3879,7 +3947,7 @@ export const getBranchByCode = async (companyId: string, code: string): Promise<
 
 export const upsertBranch = async (branch: Partial<NormalizedBranch>): Promise<NormalizedBranch> => {
     const { data, error } = await supabase
-        .from('branches')
+        .from('company_branches')
         .upsert([branch])
         .select()
         .single();
@@ -3890,7 +3958,7 @@ export const upsertBranch = async (branch: Partial<NormalizedBranch>): Promise<N
 
 export const deleteBranch = async (id: string): Promise<void> => {
     const { error } = await supabase
-        .from('branches')
+        .from('company_branches')
         .delete()
         .eq('id', id);
 
@@ -4295,7 +4363,7 @@ export const getNormalizedDashboardInsights = async (companyId: string) => {
     try {
         // Get counts from normalized tables
         const [branchRes, routeRes, customerRes, visitRes] = await Promise.all([
-            supabase.from('branches').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
+            supabase.from('company_branches').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
             supabase.from('routes').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
             supabase.from('normalized_customers').select('id', { count: 'exact', head: true }).eq('company_id', companyId),
             supabase.from('route_visits').select('id', { count: 'exact', head: true }).eq('company_id', companyId)

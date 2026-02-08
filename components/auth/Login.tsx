@@ -130,6 +130,7 @@ const Login: React.FC<LoginProps> = ({ onAttemptLogin, onSysAdminLogin, language
         setRegData(prev => ({ ...prev, password: '', confirmPassword: '' }));
       }
     } catch (err: any) {
+      console.error('Supabase Auth Error:', err);
 
       // Fallback to legacy registration if Supabase Auth not configured
       try {
@@ -163,7 +164,10 @@ const Login: React.FC<LoginProps> = ({ onAttemptLogin, onSysAdminLogin, language
         setRegData(prev => ({ ...prev, password: '', confirmPassword: '' }));
       } catch (fallbackErr: any) {
 
-        setError(err.message || fallbackErr.message || 'Registration failed');
+        console.error('Registration Error Structure:', err);
+        console.error('Fallback Error Structure:', fallbackErr);
+        // Prioritize fallback error as it likely contains the specific DB constraint info
+        setError(fallbackErr?.message || err?.message || 'Registration failed');
       }
     } finally {
 

@@ -258,8 +258,8 @@ const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({ company, on
             const branchToSave: Partial<NormalizedBranch> = {
                 id: editingBranch?.id,
                 name_en: tempBranch.name,
-                name_ar: (tempBranch as any).nameAr || '',
-                code: (tempBranch as any).code || tempBranch.name?.toUpperCase().replace(/\s+/g, '_'),
+                name_ar: tempBranch.nameAr || '',
+                code: tempBranch.code || tempBranch.name?.toUpperCase().replace(/\s+/g, '_'),
                 company_id: company.id,
                 is_active: tempBranch.isActive !== false,
                 lat: tempBranch.coordinates?.lat,
@@ -277,6 +277,8 @@ const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({ company, on
             const newBranchConfig: BranchConfig = {
                 id: savedBranch.id,
                 name: savedBranch.name_en,
+                nameAr: savedBranch.name_ar || undefined,
+                code: savedBranch.code,
                 coordinates: savedBranch.lat && savedBranch.lng ? { lat: savedBranch.lat, lng: savedBranch.lng } : undefined,
                 address: tempBranch.address,
                 isActive: savedBranch.is_active
@@ -688,7 +690,8 @@ const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({ company, on
                                                                 const latKey = findKey(['lat', 'latitude', 'y', 'gps_lat']);
                                                                 const lngKey = findKey(['lng', 'lon', 'long', 'longitude', 'x', 'gps_long', 'gps_lng']);
                                                                 const addressKey = findKey(['address', 'location', 'city', 'street']);
-                                                                const codeKey = findKey(['code', 'id', 'branch_code']);
+                                                                const codeKey = findKey(['code', 'id', 'branch_code', 'branch code', 'region code', 'region_code', 'site_code']);
+                                                                const nameArKey = findKey(['name_ar', 'name ar', 'name (ar)', 'الاسم', 'اسم الفرع']);
 
                                                                 if (!nameKey || !latKey || !lngKey) {
                                                                     console.warn(`Auto-detect failed. Headers found: ${headers.join(', ')}. Retrying without headers...`);
@@ -817,7 +820,11 @@ const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({ company, on
                                                                     // Pre-index known branch names/codes for faster/easier matching
                                                                     const existingNamesMap = new Set(currentBranches.map(b => normalizeString(b.name)));
                                                                     const dbNamesMap = new Set(dbBranches.map(b => normalizeString(b.name_en)));
-                                                                    const existingCodesMap = new Set(currentBranches.filter(b => b.id).map(b => String(b.id)));
+                                                                    const existingCodesMap = new Set<string>();
+                                                                    currentBranches.forEach(b => {
+                                                                        if (b.id) existingCodesMap.add(String(b.id));
+                                                                        if (b.code) existingCodesMap.add(String(b.code));
+                                                                    });
 
                                                                     let addedCount = 0;
                                                                     let updatedCount = 0;
@@ -828,14 +835,15 @@ const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({ company, on
                                                                         const lng = parseFloat(row[lngKey]);
                                                                         const address = addressKey ? String(row[addressKey] || '').trim() : '';
                                                                         const code = codeKey ? String(row[codeKey] || '').trim() : '';
+                                                                        const nameAr = nameArKey ? String(row[nameArKey] || '').trim() : '';
 
-                                                                        if (name) {
-                                                                            const normalizedName = String(name).trim();
-                                                                            const searchKey = normalizeString(normalizedName);
+                                                                        if (name || code) {
+                                                                            const normalizedName = name ? String(name).trim() : '';
+                                                                            const searchKey = normalizedName ? normalizeString(normalizedName) : '';
 
                                                                             // Try to find existing branch by code first, then by normalized name
                                                                             const existingIdx = currentBranches.findIndex(b =>
-                                                                                (code && String(b.id) === code) ||
+                                                                                (code && (String(b.code || '') === code || String(b.id) === code)) ||
                                                                                 (searchKey && normalizeString(b.name) === searchKey)
                                                                             );
 
@@ -850,19 +858,24 @@ const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({ company, on
                                                                                 if (address && (!existing.address || existing.address.trim() === '')) {
                                                                                     updated.address = address;
                                                                                 }
+                                                                                if (nameAr && !existing.nameAr) {
+                                                                                    updated.nameAr = nameAr;
+                                                                                }
                                                                                 currentBranches[existingIdx] = updated;
                                                                                 updatedCount++;
-                                                                            } else if (!dbNamesMap.has(searchKey) && !(code && existingCodesMap.has(code))) {
-                                                                                // Add new only if not in current list or DB
+                                                                            } else if (name && !dbNamesMap.has(searchKey) && !(code && existingCodesMap.has(code))) {
+                                                                                // Add new only if we have a name AND it's not in current list or DB
                                                                                 currentBranches.push({
-                                                                                    id: code || crypto.randomUUID(),
+                                                                                    id: crypto.randomUUID(),
                                                                                     name: normalizedName,
+                                                                                    nameAr: nameAr,
+                                                                                    code: code,
                                                                                     coordinates: (!isNaN(lat) && !isNaN(lng)) ? { lat, lng } : undefined,
                                                                                     address: address,
                                                                                     isActive: true
                                                                                 });
                                                                                 addedCount++;
-                                                                                existingNamesMap.add(searchKey);
+                                                                                if (searchKey) existingNamesMap.add(searchKey);
                                                                                 if (code) existingCodesMap.add(code);
                                                                             }
                                                                         }
@@ -894,7 +907,8 @@ const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({ company, on
                                                                                             await upsertBranch({
                                                                                                 id: b.id,
                                                                                                 name_en: b.name,
-                                                                                                code: b.id,
+                                                                                                name_ar: b.nameAr || '',
+                                                                                                code: b.code || b.id,
                                                                                                 company_id: company.id,
                                                                                                 is_active: b.isActive,
                                                                                                 lat: b.coordinates?.lat,
@@ -1036,6 +1050,8 @@ const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({ company, on
                                                                     setEditingBranch(branch as any);
                                                                     setTempBranch({
                                                                         name: branch.name_en,
+                                                                        nameAr: branch.name_ar,
+                                                                        code: branch.code,
                                                                         isActive: branch.is_active,
                                                                         coordinates: branch.lat && branch.lng ? { lat: branch.lat, lng: branch.lng } : undefined,
                                                                         id: branch.id
@@ -1428,6 +1444,21 @@ const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({ company, on
                                     onChange={(val: string) => setTempBranch(prev => ({ ...prev, name: val }))}
                                     placeholder="e.g. Riyadh HQ"
                                 />
+                                <div className="grid grid-cols-2 gap-4">
+                                    <TextInput
+                                        label="Branch Name (Arabic)"
+                                        value={tempBranch.nameAr || ''}
+                                        onChange={(val: string) => setTempBranch(prev => ({ ...prev, nameAr: val }))}
+                                        placeholder="الفرع الرئيسي"
+                                    />
+                                    <TextInput
+                                        label="Branch Code"
+                                        value={tempBranch.code || ''}
+                                        onChange={(val: string) => setTempBranch(prev => ({ ...prev, code: val }))}
+                                        placeholder="e.g. RYH_HQ"
+                                        subtext="Used for system integrations"
+                                    />
+                                </div>
                                 <TextInput
                                     label="Quick Coordinates (Lat, Lng)"
                                     value={coordString}

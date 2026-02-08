@@ -341,7 +341,7 @@ const ModernOSLayout: React.FC<ModernLayoutProps> = (props) => {
             label: t.pricing,
             icon: Crown,
             color: 'from-yellow-400 to-amber-300',
-            enabled: true
+            enabled: currentUser.role === UserRole.ADMIN
         },
         {
             id: ViewMode.SYSADMIN_DASHBOARD,

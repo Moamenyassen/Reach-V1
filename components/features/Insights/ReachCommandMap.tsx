@@ -109,6 +109,8 @@ const ReachCommandMap: React.FC<ReachCommandMapProps> = ({ companyLocation, comp
     const [activeBranchId, setActiveBranchId] = useState<string | null>(null);
     const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
 
+    console.log('ReachCommandMap branches:', branches);
+
     // Determine Country Border
     const activeBorder = React.useMemo(() => {
         const normalizedCountry = country?.trim().toUpperCase() || 'SAUDI ARABIA';
@@ -228,7 +230,9 @@ const ReachCommandMap: React.FC<ReachCommandMapProps> = ({ companyLocation, comp
 
                 {/* Configured Company Branches */}
                 {branches.map((branch, idx) => {
-                    if (!branch.isActive || !branch.coordinates) return null;
+                    const hasLat = branch.coordinates?.lat !== undefined && branch.coordinates?.lat !== null;
+                    const hasLng = branch.coordinates?.lng !== undefined && branch.coordinates?.lng !== null;
+                    if (!branch.isActive || !hasLat || !hasLng) return null;
 
                     return (
                         <Marker

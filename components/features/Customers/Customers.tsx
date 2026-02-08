@@ -7,6 +7,8 @@ interface CustomersProps {
     companyId?: string;
     isDarkMode: boolean;
     language: 'en' | 'ar';
+    userRole?: string;      // NEW: User's role for access control
+    userBranchIds?: string[]; // NEW: User's assigned branches for filtering
     onNavigate: (view: string) => void;
     hideHeader?: boolean;
     onUpdateCustomer?: (customer: Customer) => void;
@@ -24,8 +26,23 @@ const Customers: React.FC<CustomersProps> = ({
     onUpdateCustomer,
     onUpload,
     companySettings,
-    isLoading: isGlobalLoading = false
+    isLoading: isGlobalLoading = false,
+    userRole,
+    userBranchIds
 }) => {
+    // Determine if user should see all data (admin/manager) or filtered by branches
+    const isAdmin = userRole === 'ADMIN' || userRole === 'MANAGER' || userRole === 'SYSADMIN';
+    const effectiveBranchIds = isAdmin ? undefined : userBranchIds;
+
+    // DEBUG: Log branch filtering values
+    console.log('[Customers] Branch Filter Debug:', {
+        companyId,
+        userRole,
+        userBranchIds,
+        isAdmin,
+        effectiveBranchIds
+    });
+
     // Server-Side State
     const [data, setData] = useState<Customer[]>([]);
     const [totalItems, setTotalItems] = useState(0);
@@ -53,12 +70,12 @@ const Customers: React.FC<CustomersProps> = ({
     useEffect(() => {
         if (companyId) {
             fetchCustomerRegions(companyId).then(setRegions);
-            // Fetch total count (unfiltered)
-            fetchCustomers(companyId, 0, 1, {}, 'name', true).then(res => {
+            // Fetch total count (filtered by user's branches if not admin)
+            fetchCustomers(companyId, 0, 1, {}, 'name', true, effectiveBranchIds).then(res => {
                 setTotalDatabaseCount(res.count);
             });
         }
-    }, [companyId]);
+    }, [companyId, effectiveBranchIds]);
 
     // Debounce Search
     useEffect(() => {
@@ -88,7 +105,8 @@ const Customers: React.FC<CustomersProps> = ({
                 itemsPerPage,
                 filters,
                 sortConfig.key as string,
-                sortConfig.direction === 'asc'
+                sortConfig.direction === 'asc',
+                effectiveBranchIds // Pass branch restriction for non-admin users
             );
 
             setData(result.data);
@@ -98,7 +116,7 @@ const Customers: React.FC<CustomersProps> = ({
         } finally {
             setIsFetching(false);
         }
-    }, [companyId, currentPage, itemsPerPage, debouncedSearch, filterRegion, filterAlert, filterSource, sortConfig]);
+    }, [companyId, currentPage, itemsPerPage, debouncedSearch, filterRegion, filterAlert, filterSource, sortConfig, effectiveBranchIds]);
 
     useEffect(() => {
         loadCustomers();

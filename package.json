@@ -20,7 +20,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@google/genai": "^1.30.0",
     "@react-google-maps/api": "^2.20.8",
-    "@supabase/supabase-js": "^2.89.0",
+    "@supabase/supabase-js": "^2.93.3",
     "@tanstack/react-query": "^5.90.19",
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "^3.13.18",

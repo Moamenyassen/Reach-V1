@@ -36,36 +36,53 @@ export const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2
 };
 
 // Calculate driving time in minutes given distance in km, including traffic factor
-export const calculateTime = (distanceKm: number, config: Partial<OptimizerConfig> = {}): number => {
-  const { avgSpeedKmh = AVG_SPEED_KMH, trafficFactor = TRAFFIC_FACTOR } = config;
+export const calculateTime = (distanceKm: number, config: Partial<OptimizerConfig> & { isUrban?: boolean, regionCode?: string } = {}): number => {
+  const {
+    avgSpeedKmh = AVG_SPEED_KMH,
+    trafficFactor = TRAFFIC_FACTOR,
+    isUrban = false
+  } = config;
+
   // --- Smart Heuristic Logic ---
+  // 1. Dynamic Speed based on Segment Length (Urban vs Highway Efficiency)
+  let baseSpeed = avgSpeedKmh;
 
-  // 1. Dynamic Speed based on Segment Length (Urban vs Highway)
-  let dynamicSpeed = avgSpeedKmh;
-
-  if (distanceKm < 2.0) {
-    dynamicSpeed = 20; // Urban / Residential (Stop & Go)
-  } else if (distanceKm < 10.0) {
-    dynamicSpeed = 40; // City Arterials
+  if (distanceKm < 0.5) {
+    baseSpeed = 12; // Hyper-local (Parking, U-turns, short alleys)
+  } else if (distanceKm < 2.0) {
+    baseSpeed = 22; // Residential / Neighborhood
+  } else if (distanceKm < 5.0) {
+    baseSpeed = 38; // Minor Arterials
+  } else if (distanceKm < 15.0) {
+    baseSpeed = 55; // Major Arterials / Ring Roads
   } else {
-    dynamicSpeed = 75; // Highway / Open Road
+    baseSpeed = 85; // Inter-city / Highway
   }
+
+  // Adjust for Urban Density if explicitly known or for very short segments
+  if (isUrban || distanceKm < 3.0) {
+    baseSpeed = baseSpeed * 0.85; // 15% reduction for high-density congestion
+  }
+
+  // Ensure we don't exceed a realistic floor
+  const finalSpeed = Math.max(baseSpeed, 10);
 
   // Base time in minutes
-  let minutes = (distanceKm / dynamicSpeed) * 60;
+  let minutes = (distanceKm / finalSpeed) * 60;
 
-  // 2. Time-of-Day Traffic Factor (Simple Multiplier)
-  // If we have a start time, we could be more precise, but for now we apply a general "Urban Density" penalty
-  // If the segment is short (Urban), we double the traffic impact
-
+  // 2. Traffic Factor Overheads
   let appliedTrafficFactor = trafficFactor;
-  if (distanceKm < 5.0) {
-    appliedTrafficFactor = Math.max(trafficFactor, 1.3); // Force at least 30% overhead for short urban hops
+
+  // Short urban hops suffer more from signal delays and turns
+  if (distanceKm < 1.0) {
+    appliedTrafficFactor = Math.max(trafficFactor, 1.45);
+  } else if (distanceKm < 5.0) {
+    appliedTrafficFactor = Math.max(trafficFactor, 1.25);
   }
 
-  // TODO: Integrate Google Maps Routes API for real-time traffic if API key is present
+  // TODO: Future integration with real-time mapping services (Google/Mapbox)
   if (config.googleMapsApiKey) {
-    // Placeholder for future async call
+    // Placeholder: await fetchRealTimeTraffic(...)
   }
 
   return minutes * appliedTrafficFactor;

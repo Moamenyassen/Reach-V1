@@ -1,4 +1,5 @@
 -- SMART INSIGHTS: Distance, Time, Efficiency, Frequency, Proximity
+-- Updated to respect RLS / User Assignments
 CREATE OR REPLACE FUNCTION get_dashboard_stats_from_upload(p_company_id TEXT) RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE v_total_customers INT;
 v_active_routes INT;
@@ -16,16 +17,41 @@ v_alerts JSONB;
 v_result JSONB;
 v_min_clients INT;
 v_max_clients INT;
-BEGIN -- 1. Basis Stats
+-- User Context
+_is_admin BOOLEAN;
+_user_branches TEXT [];
+_user_routes TEXT [];
+BEGIN -- 0. Determine User Access
+-- We can re-use the helper functions we defined in RLS migration
+-- checks: is_admin_or_manager(), get_user_branch_ids(), get_user_route_ids()
+SELECT is_admin_or_manager() INTO _is_admin;
+SELECT get_user_branch_ids() INTO _user_branches;
+SELECT get_user_route_ids() INTO _user_routes;
+-- 1. Basis Stats (Filtered)
 SELECT COUNT(*) INTO v_total_visits
-FROM company_uploaded_data
-WHERE company_id = p_company_id;
+FROM company_uploaded_data d
+WHERE d.company_id = p_company_id
+    AND (
+        _is_admin
+        OR d.branch_name = ANY(_user_branches) -- FIXED: Match Name
+        OR d.route_name = ANY(_user_routes)
+    );
 SELECT COUNT(DISTINCT client_code) INTO v_total_customers
-FROM company_uploaded_data
-WHERE company_id = p_company_id;
+FROM company_uploaded_data d
+WHERE d.company_id = p_company_id
+    AND (
+        _is_admin
+        OR d.branch_name = ANY(_user_branches) -- FIXED: Match Name
+        OR d.route_name = ANY(_user_routes)
+    );
 SELECT COUNT(DISTINCT route_name) INTO v_active_routes
-FROM company_uploaded_data
-WHERE company_id = p_company_id;
+FROM company_uploaded_data d
+WHERE d.company_id = p_company_id
+    AND (
+        _is_admin
+        OR d.branch_name = ANY(_user_branches) -- FIXED: Match Name
+        OR d.route_name = ANY(_user_routes)
+    );
 -- FETCH SETTINGS (or default to 80-120)
 SELECT COALESCE(
         (
@@ -42,7 +68,7 @@ SELECT COALESCE(
     v_max_clients
 FROM companies
 WHERE id = p_company_id;
--- 2. SMART CALCULATIONS (Geospatial)
+-- 2. SMART CALCULATIONS (Geospatial) - Filtered
 WITH route_points AS (
     SELECT route_name,
         lat,
@@ -55,10 +81,15 @@ WITH route_points AS (
             PARTITION BY route_name
             ORDER BY lat DESC
         ) as prev_lng
-    FROM company_uploaded_data
+    FROM company_uploaded_data d
     WHERE company_id = p_company_id
         AND lat IS NOT NULL
         AND lat != 0
+        AND (
+            _is_admin
+            OR d.branch_name = ANY(_user_branches)
+            OR d.route_name = ANY(_user_routes)
+        )
 )
 SELECT COALESCE(
         SUM(
@@ -96,12 +127,17 @@ END IF;
 IF v_total_time > 0 THEN v_efficiency := ROUND(((v_total_visits * 8.0) / v_total_time) * 100);
 ELSE v_efficiency := 100;
 END IF;
--- 3. Route Health (Based on UNIQUE CUSTOMERS)
+-- 3. Route Health (Based on UNIQUE CUSTOMERS) - Filtered
 WITH route_counts AS (
     SELECT route_name,
         COUNT(DISTINCT client_code) as customer_count
-    FROM company_uploaded_data
+    FROM company_uploaded_data d
     WHERE company_id = p_company_id
+        AND (
+            _is_admin
+            OR d.branch_name = ANY(_user_branches)
+            OR d.route_name = ANY(_user_routes)
+        )
     GROUP BY route_name
 ),
 health_stats AS (
@@ -119,37 +155,51 @@ health_stats AS (
 )
 SELECT row_to_json(health_stats)::JSONB INTO v_route_health
 FROM health_stats;
--- 4. Alerts 
--- Missing GPS (Unique Customers)
+-- 4. Alerts - Filtered
+-- Missing GPS
 SELECT COUNT(DISTINCT client_code) INTO v_missing_gps
-FROM company_uploaded_data
+FROM company_uploaded_data d
 WHERE company_id = p_company_id
     AND (
         lat IS NULL
         OR lat = 0
         OR lng IS NULL
         OR lng = 0
+    )
+    AND (
+        _is_admin
+        OR d.branch_name = ANY(_user_branches)
+        OR d.route_name = ANY(_user_routes)
     );
--- Proximity Issues (Unique Customers sharing exact same location)
--- We want to count how many distinct customers are sharing coordinates with at least one other distinct customer.
+-- Proximity Issues
 WITH location_duplicates AS (
     SELECT lat,
         lng
-    FROM company_uploaded_data
+    FROM company_uploaded_data d
     WHERE company_id = p_company_id
         AND lat IS NOT NULL
         AND lat != 0
+        AND (
+            _is_admin
+            OR d.branch_name = ANY(_user_branches)
+            OR d.route_name = ANY(_user_routes)
+        )
     GROUP BY lat,
         lng
     HAVING COUNT(DISTINCT client_code) > 1
 )
 SELECT COUNT(DISTINCT client_code) INTO v_proximity_issues
-FROM company_uploaded_data
+FROM company_uploaded_data d
 WHERE company_id = p_company_id
     AND (lat, lng) IN (
         SELECT lat,
             lng
         FROM location_duplicates
+    )
+    AND (
+        _is_admin
+        OR d.branch_name = ANY(_user_branches)
+        OR d.route_name = ANY(_user_routes)
     );
 v_alerts := jsonb_build_object(
     'missingGps',

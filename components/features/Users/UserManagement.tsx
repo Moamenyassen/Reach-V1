@@ -9,7 +9,8 @@ import {
     getRouteMeta,
     fetchCompanyBranches,
     fetchCompanyRoutes,
-    fetchCompanyRegions
+    fetchCompanyRegions,
+    fetchCompanyReps
 } from '../../../services/supabase';
 import {
     Users,
@@ -80,10 +81,13 @@ const UserManagement: React.FC<UserManagementProps> = ({
     const [availableRegions, setAvailableRegions] = useState<{ code: string; description: string }[]>([]);
     const [availableBranches, setAvailableBranches] = useState<string[]>([]);
     const [availableRoutes, setAvailableRoutes] = useState<{ routeName: string; userCode: string }[]>([]);
+    const [availableReps, setAvailableReps] = useState<{ userCode: string; name: string }[]>([]);
+    const [selectedRepCodes, setSelectedRepCodes] = useState<string[]>([]);
 
     const [isRegionDropdownOpen, setIsRegionDropdownOpen] = useState(false);
     const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
     const [isRouteDropdownOpen, setIsRouteDropdownOpen] = useState(false);
+    const [isRepDropdownOpen, setIsRepDropdownOpen] = useState(false);
 
     // Sort State
     const [sortConfig, setSortConfig] = useState<{ key: keyof User | 'lastActive'; direction: 'asc' | 'desc' } | null>(null);
@@ -95,11 +99,13 @@ const UserManagement: React.FC<UserManagementProps> = ({
         setSelectedRegionIds([]);
         setSelectedBranchIds([]);
         setSelectedRouteIds([]);
+        setSelectedRepCodes([]);
         setIsActive(true);
         setIsUserModalOpen(false);
         setIsRegionDropdownOpen(false);
         setIsBranchDropdownOpen(false);
         setIsRouteDropdownOpen(false);
+        setIsRepDropdownOpen(false);
     };
 
     const handleOpenAddUser = () => {
@@ -115,6 +121,7 @@ const UserManagement: React.FC<UserManagementProps> = ({
         setSelectedRegionIds(user.regionIds || []);
         setSelectedBranchIds(user.branchIds || []);
         setSelectedRouteIds(user.routeIds || []);
+        setSelectedRepCodes(user.repCodes || []);
         setIsActive(user.isActive);
         setModalMode('EDIT');
         setIsUserModalOpen(true);
@@ -143,56 +150,78 @@ const UserManagement: React.FC<UserManagementProps> = ({
 
     useEffect(() => {
         if (currentCompany?.id) {
-            fetchCompanyRoutes(currentCompany.id, selectedBranchIds).then(setAvailableRoutes);
+            fetchCompanyRoutes(currentCompany.id, selectedBranchIds).then(routes => {
+                const mappedRoutes = (routes || []).map((r: any) => {
+                    if (typeof r === 'string') return { routeName: r, userCode: '' };
+                    return { routeName: r.name || r.routeName, userCode: r.userCode || '' };
+                });
+                setAvailableRoutes(mappedRoutes);
+            });
         }
     }, [currentCompany?.id, selectedBranchIds]);
 
-    const handleRegionToggle = (code: string) => {
-        // Strict Single Region Selection
-        if (selectedRegionIds.includes(code)) {
-            setSelectedRegionIds([]);
-            setSelectedBranchIds([]);
-            setSelectedRouteIds([]);
+    useEffect(() => {
+        if (currentCompany?.id && (selectedBranchIds.length > 0 || selectedRouteIds.length > 0)) {
+            fetchCompanyReps(currentCompany.id, selectedBranchIds, selectedRouteIds).then(setAvailableReps);
         } else {
-            setSelectedRegionIds([code]);
-            setSelectedBranchIds([]);
-            setSelectedRouteIds([]);
+            setAvailableReps([]);
         }
-        setIsRegionDropdownOpen(false);
+    }, [currentCompany?.id, selectedBranchIds, selectedRouteIds]);
+
+    const handleRegionToggle = (code: string) => {
+        setSelectedRegionIds(prev =>
+            prev.includes(code) ? prev.filter(id => id !== code) : [...prev, code]
+        );
+        // We don't necessarily want to reset branches if it's multi-select, 
+        // but it's safer to keep the current selection and just update available ones via useEffect.
     };
 
     const handleBranchToggle = (code: string) => {
-        // Strict Single Branch Selection
-        setSelectedBranchIds([code]);
-        // Reset Route when branch changes
-        setSelectedRouteIds([]);
-        // Auto-close dropdown (optional, but good for UX)
-        setIsBranchDropdownOpen(false);
+        setSelectedBranchIds(prev =>
+            prev.includes(code) ? prev.filter(id => id !== code) : [...prev, code]
+        );
     };
 
     const handleRouteToggle = (routeKey: string) => {
-        // Strict Single Route Selection
-        setSelectedRouteIds([routeKey]);
-        setIsRouteDropdownOpen(false);
+        setSelectedRouteIds(prev =>
+            prev.includes(routeKey) ? prev.filter(id => id !== routeKey) : [...prev, routeKey]
+        );
     };
 
-    const handleSubmitUser = (e: React.FormEvent) => {
+    const handleRepToggle = (userCode: string) => {
+        setSelectedRepCodes(prev =>
+            prev.includes(userCode) ? prev.filter(c => c !== userCode) : [...prev, userCode]
+        );
+    };
+
+    const [isSaving, setIsSaving] = useState(false);
+
+    const handleSubmitUser = async (e: React.FormEvent) => {
         e.preventDefault();
         if (username && password) {
-            const userData: Partial<User> = {
-                username,
-                password,
-                role,
-                branchIds: (role !== UserRole.ADMIN) ? selectedBranchIds : [],
-                routeIds: (role !== UserRole.ADMIN) ? selectedRouteIds : [],
-                regionIds: (role !== UserRole.ADMIN) ? selectedRegionIds : [],
-                isActive: isActive
-            };
+            setIsSaving(true);
+            try {
+                const userData: Partial<User> = {
+                    username,
+                    password,
+                    role,
+                    branchIds: selectedBranchIds,
+                    routeIds: selectedRouteIds,
+                    regionIds: selectedRegionIds,
+                    repCodes: selectedRepCodes,
+                    isActive: isActive
+                };
 
-            if (modalMode === 'ADD') onAddUser(userData as User);
-            else if (modalMode === 'EDIT' && onUpdateUser) onUpdateUser(userData as User);
+                if (modalMode === 'ADD') await onAddUser(userData as User);
+                else if (modalMode === 'EDIT' && onUpdateUser) await onUpdateUser(userData as User);
 
-            resetForm();
+                resetForm();
+            } catch (error: any) {
+                console.error("Failed to save user:", error);
+                alert("Failed to save user: " + (error.message || "Unknown error"));
+            } finally {
+                setIsSaving(false);
+            }
         }
     };
 
@@ -352,6 +381,7 @@ const UserManagement: React.FC<UserManagementProps> = ({
                 <div className="relative min-w-[140px]">
                     <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                     <select
+                        title="Filter by Role"
                         value={roleFilter}
                         onChange={(e) => setRoleFilter(e.target.value)}
                         className="w-full pl-10 pr-8 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm appearance-none focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
@@ -364,6 +394,7 @@ const UserManagement: React.FC<UserManagementProps> = ({
                 <div className="relative min-w-[140px]">
                     <div className={`absolute left-3 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full ${statusFilter === 'ACTIVE' ? 'bg-emerald-500' : (statusFilter === 'INACTIVE' ? 'bg-red-500' : 'bg-gray-400')} `} />
                     <select
+                        title="Filter by Status"
                         value={statusFilter}
                         onChange={(e) => setStatusFilter(e.target.value)}
                         className="w-full pl-8 pr-8 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm appearance-none focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
@@ -497,7 +528,7 @@ const UserManagement: React.FC<UserManagementProps> = ({
             {isUserModalOpen && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl p-8 max-w-md w-full relative border border-gray-200 dark:border-gray-700 scale-100 animate-in zoom-in-95 duration-200">
-                        <button onClick={() => setIsUserModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
+                        <button onClick={() => setIsUserModalOpen(false)} title="Close Modal" aria-label="Close" className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
                             <X className="w-6 h-6" />
                         </button>
 
@@ -551,6 +582,7 @@ const UserManagement: React.FC<UserManagementProps> = ({
                                     <div className="relative">
                                         <Shield className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                                         <select
+                                            title="User Role"
                                             value={role}
                                             onChange={e => setRole(e.target.value as UserRole)}
                                             className="w-full bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-xl pl-11 pr-8 py-3.5 focus:ring-2 focus:ring-indigo-500 outline-none text-gray-900 dark:text-white font-medium appearance-none cursor-pointer"
@@ -568,184 +600,126 @@ const UserManagement: React.FC<UserManagementProps> = ({
                                         role === UserRole.MANAGER ? 'bg-blue-100 text-blue-600' :
                                             'bg-gray-100 text-gray-500'
                                         } `}>
-                                        {role === UserRole.ADMIN ? 'Full Access' :
+                                        {role === UserRole.ADMIN ? 'Admin Privileges' :
                                             role === UserRole.MANAGER ? 'Region Control' : 'Restricted'}
                                     </div>
                                 </div>
                             </div>
 
-                            {(role !== UserRole.ADMIN) && (
-                                <div className="space-y-4">
-                                    {/* Region Selection */}
-                                    <div className="relative">
-                                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Assigned Regions</label>
-                                        <button
-                                            type="button"
-                                            onClick={() => { setIsRegionDropdownOpen(!isRegionDropdownOpen); setIsBranchDropdownOpen(false); setIsRouteDropdownOpen(false); }}
-                                            className="w-full bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-xl px-4 py-3.5 text-left text-sm font-medium flex justify-between items-center text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
-                                        >
-                                            <span className={selectedRegionIds.length === 0 ? 'text-gray-400' : ''}>
-                                                {selectedRegionIds.length > 0 ? `${selectedRegionIds.length} Regions Selected` : 'Select Permitted Regions (Optional)'}
-                                            </span>
-                                            <ChevronDown className="w-4 h-4 text-gray-400" />
-                                        </button>
+                            <div className="space-y-4">
+                                {/* Branch Selection */}
+                                <div className="relative">
+                                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Assigned Branches</label>
+                                    <button
+                                        type="button"
+                                        onClick={() => { setIsBranchDropdownOpen(!isBranchDropdownOpen); setIsRouteDropdownOpen(false); }}
+                                        className="w-full bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-xl px-4 py-3.5 text-left text-sm font-medium flex justify-between items-center text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                                    >
+                                        <span className={selectedBranchIds.length === 0 ? 'text-gray-400' : ''}>
+                                            {selectedBranchIds.length > 0 ? `${selectedBranchIds.length} Branches Selected` : 'Select Assigned Branches'}
+                                        </span>
+                                        <ChevronDown className="w-4 h-4 text-gray-400" />
+                                    </button>
 
-                                        {isRegionDropdownOpen && (
-                                            <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl shadow-xl max-h-48 overflow-y-auto z-30 p-2 custom-scrollbar animate-in slide-in-from-top-2">
-                                                {availableRegions.length > 0 && (
-                                                    <div className="flex justify-between px-3 py-2 border-b border-gray-100 dark:border-gray-600 mb-1 sticky top-0 bg-white dark:bg-gray-700 z-10">
-                                                        <button
-                                                            type="button"
-                                                            onClick={(e) => { e.stopPropagation(); setSelectedRegionIds(availableRegions.map(r => r.code)); }}
-                                                            className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
-                                                        >
-                                                            Select All
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={(e) => { e.stopPropagation(); setSelectedRegionIds([]); }}
-                                                            className="text-xs font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400"
-                                                        >
-                                                            Clear
-                                                        </button>
-                                                    </div>
-                                                )}
-                                                {availableRegions.length === 0 ? (
-                                                    <div className="p-4 text-center text-xs text-gray-500">
-                                                        No regions found.
-                                                    </div>
-                                                ) : (
-                                                    availableRegions.map(region => (
-                                                        <label key={region.code} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-600 rounded-lg cursor-pointer transition-colors" onClick={(e) => e.stopPropagation()}>
-                                                            <input
-                                                                type="radio"
-                                                                checked={selectedRegionIds.includes(region.code)}
-                                                                onChange={() => handleRegionToggle(region.code)}
-                                                                className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 dark:border-gray-500"
-                                                            />
-                                                            <span className="text-sm text-gray-700 dark:text-gray-200 font-medium">{region.description} ({region.code})</span>
-                                                        </label>
-                                                    ))
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
-                                    {/* Branch Selection */}
-                                    <div className="relative">
-                                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">{t.assignedBranches}</label>
-                                        <button
-                                            type="button"
-                                            onClick={() => { setIsBranchDropdownOpen(!isBranchDropdownOpen); setIsRegionDropdownOpen(false); setIsRouteDropdownOpen(false); }}
-                                            className="w-full bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-xl px-4 py-3.5 text-left text-sm font-medium flex justify-between items-center text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
-                                        >
-                                            <span className={selectedBranchIds.length === 0 ? 'text-gray-400' : ''}>
-                                                {selectedBranchIds.length > 0 ? `${selectedBranchIds.length} Branches Selected` : 'Select Permitted Branches (Optional)'}
-                                            </span>
-                                            <ChevronDown className="w-4 h-4 text-gray-400" />
-                                        </button>
-
-                                        {isBranchDropdownOpen && (
-                                            <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl shadow-xl max-h-48 overflow-y-auto z-30 p-2 custom-scrollbar animate-in slide-in-from-top-2">
-                                                {availableBranches.length > 0 && (
-                                                    <div className="flex justify-between px-3 py-2 border-b border-gray-100 dark:border-gray-600 mb-1 sticky top-0 bg-white dark:bg-gray-700 z-10">
-                                                        <button
-                                                            type="button"
-                                                            onClick={(e) => { e.stopPropagation(); setSelectedBranchIds(availableBranches); }}
-                                                            className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
-                                                        >
-                                                            Select All
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={(e) => { e.stopPropagation(); setSelectedBranchIds([]); }}
-                                                            className="text-xs font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400"
-                                                        >
-                                                            Clear
-                                                        </button>
-                                                    </div>
-                                                )}
-                                                {availableBranches.length === 0 ? (
-                                                    <div className="p-4 text-center text-xs text-gray-500">
-                                                        No branches found in customer data.
-                                                    </div>
-                                                ) : (
-                                                    availableBranches.map(branch => (
-                                                        <label key={branch} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-600 rounded-lg cursor-pointer transition-colors" onClick={(e) => e.stopPropagation()}>
-                                                            <input
-                                                                type="radio"
-                                                                checked={selectedBranchIds.includes(branch)}
-                                                                onChange={() => handleBranchToggle(branch)}
-                                                                className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 dark:border-gray-500"
-                                                            />
-                                                            <span className="text-sm text-gray-700 dark:text-gray-200 font-medium">{branch}</span>
-                                                        </label>
-                                                    ))
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    <div className="relative">
-                                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Assigned Routes</label>
-                                        <button
-                                            type="button"
-                                            onClick={() => { setIsRouteDropdownOpen(!isRouteDropdownOpen); setIsRegionDropdownOpen(false); setIsBranchDropdownOpen(false); }}
-                                            className="w-full bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-xl px-4 py-3.5 text-left text-sm font-medium flex justify-between items-center text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
-                                        >
-                                            <span className={selectedRouteIds.length === 0 ? 'text-gray-400' : ''}>
-                                                {selectedRouteIds.length > 0 ? `${selectedRouteIds.length} Routes Selected` : 'Select Permitted Routes (Optional)'}
-                                            </span>
-                                            <ChevronDown className="w-4 h-4 text-gray-400" />
-                                        </button>
-
-                                        {isRouteDropdownOpen && (
-                                            <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl shadow-xl max-h-48 overflow-y-auto z-30 p-2 custom-scrollbar animate-in slide-in-from-top-2">
-                                                {availableRoutes.length > 0 && (
-                                                    <div className="flex justify-between px-3 py-2 border-b border-gray-100 dark:border-gray-600 mb-1 sticky top-0 bg-white dark:bg-gray-700 z-10">
-                                                        <button
-                                                            type="button"
-                                                            onClick={(e) => { e.stopPropagation(); setSelectedRouteIds(availableRoutes.map(r => r.routeName)); }}
-                                                            className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
-                                                        >
-                                                            Select All
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={(e) => { e.stopPropagation(); setSelectedRouteIds([]); }}
-                                                            className="text-xs font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400"
-                                                        >
-                                                            Clear
-                                                        </button>
-                                                    </div>
-                                                )}
-                                                {availableRoutes.length === 0 ? (
-                                                    <div className="p-4 text-center text-xs text-gray-500">
-                                                        No routes found for selected branches.
-                                                    </div>
-                                                ) : (
-                                                    availableRoutes.map(route => {
-                                                        const routeKey = route.routeName;
-                                                        return (
-                                                            <label key={routeKey} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-600 rounded-lg cursor-pointer transition-colors" onClick={(e) => e.stopPropagation()}>
-                                                                <input
-                                                                    type="radio"
-                                                                    checked={selectedRouteIds.includes(routeKey)}
-                                                                    onChange={() => handleRouteToggle(routeKey)}
-                                                                    className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 dark:border-gray-500"
-                                                                />
-                                                                <div className="flex flex-col">
-                                                                    <span className="text-sm text-gray-700 dark:text-gray-200 font-medium">{routeKey}</span>
-                                                                    {route.userCode && <span className="text-[10px] text-gray-400 font-normal">Base User: {route.userCode}</span>}
-                                                                </div>
-                                                            </label>
-                                                        );
-                                                    })
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
+                                    {isBranchDropdownOpen && (
+                                        <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl shadow-xl max-h-48 overflow-y-auto z-30 p-2 custom-scrollbar animate-in slide-in-from-top-2">
+                                            {availableBranches.length > 0 && (
+                                                <div className="flex justify-between px-3 py-2 border-b border-gray-100 dark:border-gray-600 mb-1 sticky top-0 bg-white dark:bg-gray-700 z-10">
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => { e.stopPropagation(); setSelectedBranchIds(availableBranches); }}
+                                                        className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
+                                                    >
+                                                        Select All
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => { e.stopPropagation(); setSelectedBranchIds([]); }}
+                                                        className="text-xs font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400"
+                                                    >
+                                                        Clear
+                                                    </button>
+                                                </div>
+                                            )}
+                                            {availableBranches.length === 0 ? (
+                                                <div className="p-4 text-center text-xs text-gray-500">
+                                                    No branches found for selected regions.
+                                                </div>
+                                            ) : (
+                                                availableBranches.map(branch => (
+                                                    <label key={branch} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-600 rounded-lg cursor-pointer transition-colors" onClick={(e) => e.stopPropagation()}>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={selectedBranchIds.includes(branch)}
+                                                            onChange={() => handleBranchToggle(branch)}
+                                                            className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 dark:border-gray-500 rounded"
+                                                        />
+                                                        <span className="text-sm text-gray-700 dark:text-gray-200 font-medium">{branch}</span>
+                                                    </label>
+                                                ))
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
-                            )}
+
+                                {/* Route Selection */}
+                                <div className="relative">
+                                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Assigned Routes</label>
+                                    <button
+                                        type="button"
+                                        onClick={() => { setIsRouteDropdownOpen(!isRouteDropdownOpen); setIsBranchDropdownOpen(false); }}
+                                        className="w-full bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-xl px-4 py-3.5 text-left text-sm font-medium flex justify-between items-center text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                                    >
+                                        <span className={selectedRouteIds.length === 0 ? 'text-gray-400' : ''}>
+                                            {selectedRouteIds.length > 0 ? `${selectedRouteIds.length} Routes Selected` : 'Select Assigned Routes'}
+                                        </span>
+                                        <ChevronDown className="w-4 h-4 text-gray-400" />
+                                    </button>
+
+                                    {isRouteDropdownOpen && (
+                                        <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl shadow-xl max-h-48 overflow-y-auto z-30 p-2 custom-scrollbar animate-in slide-in-from-top-2">
+                                            {availableRoutes.length > 0 && (
+                                                <div className="flex justify-between px-3 py-2 border-b border-gray-100 dark:border-gray-600 mb-1 sticky top-0 bg-white dark:bg-gray-700 z-10">
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => { e.stopPropagation(); setSelectedRouteIds(availableRoutes.map(r => r.routeName)); }}
+                                                        className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
+                                                    >
+                                                        Select All
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => { e.stopPropagation(); setSelectedRouteIds([]); }}
+                                                        className="text-xs font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400"
+                                                    >
+                                                        Clear
+                                                    </button>
+                                                </div>
+                                            )}
+                                            {availableRoutes.length === 0 ? (
+                                                <div className="p-4 text-center text-xs text-gray-500">
+                                                    No routes found for selected branches.
+                                                </div>
+                                            ) : (
+                                                availableRoutes.map(route => (
+                                                    <label key={route.routeName} className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-600 rounded-lg cursor-pointer transition-colors" onClick={(e) => e.stopPropagation()}>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={selectedRouteIds.includes(route.routeName)}
+                                                            onChange={() => handleRouteToggle(route.routeName)}
+                                                            className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 dark:border-gray-500 rounded"
+                                                        />
+                                                        <div className="flex flex-col">
+                                                            <span className="text-sm text-gray-700 dark:text-gray-200 font-medium">{route.routeName}</span>
+                                                            {route.userCode && <span className="text-[10px] text-gray-400 leading-tight">Rep: {route.userCode}</span>}
+                                                        </div>
+                                                    </label>
+                                                ))
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
 
                             <div className="pt-6 flex gap-3">
                                 <button type="button" onClick={() => setIsUserModalOpen(false)} className="flex-1 bg-white dark:bg-transparent border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 font-bold py-3.5 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">{t.cancel}</button>

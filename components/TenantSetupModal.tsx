@@ -649,7 +649,6 @@ const PlanInclusions = () => (
                 "Advanced analytics dashboard",
                 "24/7 priority support",
                 "Free onboarding & training",
-                "Mobile apps (iOS & Android)",
                 "API access for integrations"
             ].map((item, i) => (
                 <li key={i} className="flex items-center gap-3 text-xs font-medium text-slate-300">
@@ -663,45 +662,7 @@ const PlanInclusions = () => (
     </div>
 );
 
-const BenefitCard = ({ icon: Icon, title, value, subtext, gradient, delay, breakdown = [], highlightColor = "text-white" }: any) => (
-    <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: delay }}
-        className={`group relative p-6 rounded-2xl border border-white/5 overflow-hidden hover:border-white/10 transition-all hover:-translate-y-1 hover:shadow-2xl ${gradient}`}
-    >
-        <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
 
-        <div className="flex items-start justify-between relative z-10 mb-4">
-            <div className="p-3.5 rounded-2xl bg-black/20 text-white shadow-inner backdrop-blur-sm group-hover:scale-110 transition-transform duration-300 border border-white/5">
-                <Icon className="w-6 h-6" />
-            </div>
-            <div className="w-6 h-6 rounded-full bg-white/5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-help">
-                <span className="text-[10px] font-bold text-slate-400">?</span>
-            </div>
-        </div>
-
-        <div className="relative z-10">
-            <h4 className="text-[10px] font-bold text-slate-300 uppercase tracking-widest mb-1">{title}</h4>
-            <div className={`text-2xl lg:text-3xl font-black mb-2 tracking-tight ${highlightColor}`}>
-                {value}
-            </div>
-
-            {breakdown.length > 0 && (
-                <div className="space-y-1 mt-4 pt-4 border-t border-white/10">
-                    {breakdown.map((line: string, i: number) => (
-                        <p key={i} className="text-[11px] font-medium text-slate-400 flex items-center gap-2">
-                            <span className="w-1 h-1 rounded-full bg-slate-500/50" />
-                            {line}
-                        </p>
-                    ))}
-                </div>
-            )}
-
-            {!breakdown.length && <p className="text-xs text-slate-400 font-medium leading-relaxed mt-2">{subtext}</p>}
-        </div>
-    </motion.div>
-);
 
 const Step1Profile = ({ formData, setFormData, onNext, onBack }: any) => {
 
@@ -942,205 +903,138 @@ const Step3Calculator = ({
     return (
         <motion.div
             initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
-            className="w-full h-full p-6 md:p-8 flex flex-col overflow-hidden"
+            className="w-full h-full p-6 md:p-8 flex flex-col overflow-hidden items-center justify-center"
         >
-            <div className="flex items-center justify-between mb-6 shrink-0">
-                <div>
-                    <h2 className="text-3xl font-bold text-white mb-1">Finalize Setup</h2>
-                    <p className="text-slate-400 text-sm">Review limits and activate your workspace.</p>
+            <div className="w-full max-w-2xl flex flex-col h-full max-h-[90vh]">
+                <div className="flex items-center justify-between mb-6 shrink-0">
+                    <div>
+                        <h2 className="text-3xl font-bold text-white mb-1">Finalize Setup</h2>
+                        <p className="text-slate-400 text-sm">Review limits and activate your workspace.</p>
+                    </div>
                 </div>
-            </div>
 
-            <div className="flex-1 grid grid-cols-1 lg:grid-cols-[40%_60%] gap-6 overflow-hidden">
+                <div className="bg-[#1e2433]/40 rounded-3xl p-8 backdrop-blur-md flex flex-col shadow-2xl overflow-y-auto custom-scrollbar flex-1">
 
-                {/* LEFT: PRICING & CONFIG */}
-                <div className="flex flex-col h-full overflow-y-auto custom-scrollbar pr-2">
-                    <div className="bg-[#1e2433]/40 border border-[#2d3748] rounded-3xl p-6 backdrop-blur-md flex flex-col shadow-2xl flex-1">
-
-                        {/* Plan Badge */}
-                        <div className="flex justify-between items-center mb-6 pb-6 border-b border-white/10">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
-                                    <RocketIcon className="w-5 h-5 text-white" />
-                                </div>
-                                <div>
-                                    <h3 className="text-white font-bold">{plan.name} Plan</h3>
-                                    <p className="text-xs text-slate-400 capitalize">{billingCycle} Billing</p>
-                                </div>
+                    {/* Plan Badge */}
+                    <div className="flex justify-between items-center mb-8 pb-8">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                                <RocketIcon className="w-6 h-6 text-white" />
                             </div>
-                            <button onClick={onBack} className="text-[10px] font-bold uppercase tracking-wider text-cyan-400 hover:text-cyan-300">Change</button>
-                        </div>
-
-                        {/* License Counter */}
-                        <div className="mb-6">
-                            <LicenseCounter count={effectiveLicenses} onChange={setLicenseCount} min={5} />
-                        </div>
-
-                        {/* Inclusions */}
-                        <PlanInclusions />
-
-                        {/* Totals Section */}
-                        <div className="space-y-3 mt-auto bg-black/20 p-4 rounded-2xl border border-white/5">
-                            <div className="flex justify-between text-sm">
-                                <span className="text-slate-400">Subtotal</span>
-                                <span className="text-white font-medium">{formatPrice(baseSubtotal, 'SA').value} SAR</span>
+                            <div>
+                                <h3 className="text-xl text-white font-bold">{plan.name} Plan</h3>
+                                <p className="text-sm text-slate-400 capitalize">{billingCycle} Billing</p>
                             </div>
-                            <div className="flex justify-between text-sm">
-                                <span className="text-slate-400">Setup Fee</span>
+                        </div>
+                        <button onClick={onBack} className="text-xs font-bold uppercase tracking-wider text-cyan-400 hover:text-cyan-300 border border-cyan-500/30 px-4 py-2 rounded-lg hover:bg-cyan-500/10 transition-all">Change Plan</button>
+                    </div>
+
+                    {/* License Counter */}
+                    <div className="mb-8">
+                        <LicenseCounter count={effectiveLicenses} onChange={setLicenseCount} min={5} />
+                    </div>
+
+                    {/* Inclusions */}
+                    <PlanInclusions />
+
+                    {/* Totals Section */}
+                    <div className="space-y-3 mt-4 bg-black/20 p-5 rounded-2xl">
+                        <div className="flex justify-between text-xs text-slate-400">
+                            <span>Subtotal</span>
+                            <span className="text-white font-medium">{formatPrice(baseSubtotal, 'SA').value} SAR</span>
+                        </div>
+                        <div className="flex justify-between text-xs text-slate-400">
+                            <span>Setup Fee</span>
+                            <div className="text-right">
+                                {isWaived && (
+                                    <span className="block text-[10px] text-slate-500 line-through decoration-slate-600">
+                                        {formatPrice(setupFee, 'SA').value} SAR
+                                    </span>
+                                )}
                                 <span className={isWaived ? "text-emerald-400 font-bold" : "text-white"}>
-                                    {isWaived ? "WAIVED" : `${formatPrice(setupFee, 'SA').value} SAR`}
+                                    {isWaived ? "0 SAR" : `${formatPrice(setupFee, 'SA').value} SAR`}
                                 </span>
                             </div>
-
-                            {appliedPromo && (
-                                <div className="flex justify-between text-sm text-emerald-400 animate-pulse">
-                                    <span className="flex items-center gap-2"><Sparkles className="w-3 h-3" /> Discount ({appliedPromo.code})</span>
-                                    <span className="font-bold">-{formatPrice(discountAmount, 'SA').value} SAR</span>
-                                </div>
-                            )}
-
-                            <div className="h-px bg-white/10 my-2" />
-
-                            <div className="flex justify-between items-end">
-                                <span className="text-white font-bold text-lg">Total</span>
-                                <div className="text-right">
-                                    <span className="block text-3xl font-black text-white tracking-tight leading-none">{formatPrice(finalTotal, 'SA').value}<span className="text-sm text-slate-500 ml-1">SAR</span></span>
-                                    {discountAmount > 0 && <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">You saved {formatPrice(discountAmount, 'SA').value} SAR!</span>}
-                                </div>
-                            </div>
                         </div>
 
-                        {/* Promo Input */}
-                        <div className="mt-4 flex gap-2">
+                        {appliedPromo && (
+                            <div className="flex justify-between text-xs text-emerald-400 animate-pulse">
+                                <span className="flex items-center gap-2"><Sparkles className="w-3 h-3" /> Discount ({appliedPromo.code})</span>
+                                <span className="font-bold">-{formatPrice(discountAmount, 'SA').value} SAR</span>
+                            </div>
+                        )}
+
+                        <div className="flex justify-between items-end mt-4 pt-4 relative">
+                            {/* Gradient Separator suggestion: <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" /> */}
+                            {/* Removing the hard line divider as requested. Adding top padding/margin instead for spacing */}
+                            <span className="text-white font-bold text-base">Total</span>
+                            <div className="text-right">
+                                <span className="block text-3xl font-black text-white tracking-tight leading-none">{formatPrice(finalTotal, 'SA').value}<span className="text-xs text-slate-500 ml-1">SAR</span></span>
+                                {(discountAmount > 0 || isWaived) && (
+                                    <div className="flex flex-col items-end mt-1">
+                                        <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">
+                                            You saved {formatPrice(discountAmount + (isWaived ? setupFee : 0), 'SA').value} SAR!
+                                        </span>
+                                        <span className="text-[9px] text-slate-500 font-medium">
+                                            {isWaived && `(${formatPrice(setupFee, 'SA').value} Setup${discountAmount > 0 ? ' + ' : ''}`}
+                                            {discountAmount > 0 && `${formatPrice(discountAmount, 'SA').value} Promo)`}
+                                            {isWaived && discountAmount === 0 && ')'}
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Promo Input */}
+                    <div className="mt-4 flex gap-2">
+                        <div className="relative flex-1">
                             <input
                                 type="text"
                                 placeholder="PROMO CODE"
-                                className="flex-1 bg-[#0f1219] border border-[#2d3748] rounded-xl py-3 px-4 text-white text-xs font-bold uppercase focus:ring-1 focus:ring-cyan-500 outline-none"
+                                className="w-full bg-[#0f1219] border border-[#2d3748] rounded-xl py-2.5 pl-4 pr-10 text-white text-xs font-bold uppercase focus:ring-1 focus:ring-cyan-500 outline-none placeholder:normal-case placeholder:font-medium placeholder:text-slate-500"
                                 value={promoCode}
                                 onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
                             />
-                            <button
-                                onClick={handleApplyPromo}
-                                disabled={!promoCode || isValidatingPromo}
-                                className="px-4 bg-white/5 hover:bg-white/10 text-white rounded-xl border border-white/10 font-bold text-[10px] uppercase transition-all"
-                            >
-                                {appliedPromo ? <Check className="w-4 h-4 text-emerald-400" /> : 'Apply'}
-                            </button>
+                            {appliedPromo && <Check className="absolute right-3 top-1/2 -translate-y-1/2 w-3 h-3 text-emerald-400" />}
                         </div>
+                        <button
+                            onClick={handleApplyPromo}
+                            disabled={!promoCode || isValidatingPromo || appliedPromo}
+                            className={`px-4 rounded-xl font-bold text-[10px] uppercase transition-all ${appliedPromo ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' : 'bg-white/5 hover:bg-white/10 text-white border border-white/10'}`}
+                        >
+                            {appliedPromo ? 'Applied' : 'Apply'}
+                        </button>
+                    </div>
 
-                        {error && <div className="mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs flex items-center gap-2"><AlertCircle className="w-3 h-3" /> {error}</div>}
+                    {error && <div className="mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-medium flex items-center gap-2"><AlertCircle className="w-4 h-4 shrink-0" /> {error}</div>}
+
+                    {/* Actions - Big Buttons */}
+                    <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <button
+                            onClick={onContactSales}
+                            className="w-full py-4 bg-[#1e2433] hover:bg-[#2d3748] border border-cyan-500/30 text-cyan-400 hover:text-cyan-300 rounded-xl font-bold text-sm shadow-lg shadow-cyan-900/20 hover:shadow-cyan-900/40 hover:-translate-y-0.5 transition-all active:scale-[0.98] flex items-center justify-center gap-2 group"
+                        >
+                            <Mail className="w-4 h-4 group-hover:scale-110 transition-transform" /> Get Contact
+                        </button>
+
+                        <button
+                            onClick={onSubmit}
+                            disabled={isLoading}
+                            className="w-full py-4 bg-gradient-to-r from-brand-primary to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white rounded-xl font-black text-sm shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/40 hover:-translate-y-0.5 transition-all active:scale-[0.98] flex items-center justify-center gap-2 group"
+                        >
+                            {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><RocketIcon className="w-4 h-4 group-hover:-translate-y-1 transition-transform" /> Launch Workspace</>}
+                        </button>
                     </div>
                 </div>
-
-                {/* RIGHT: ROI SHOWCASE */}
-                <div className="flex flex-col h-full overflow-y-auto custom-scrollbar pl-2">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 auto-rows-fr mb-6">
-
-                        <BenefitCard
-                            icon={ClockIcon}
-                            title="Time Savings"
-                            value={`${Math.floor(hoursSavedYr).toLocaleString()} Hrs`}
-                            highlightColor="text-blue-400"
-                            breakdown={[
-                                `${Math.floor(hoursSavedMo)} hours saved / month`,
-                                `~${Math.floor(hoursSavedMo / 4)} hours saved / week`,
-                                `Equivalent to ${Math.round(effectiveLicenses * 0.8)} full-time roles`
-                            ]}
-                            gradient="bg-gradient-to-br from-blue-900/40 via-[#0f1219] to-[#0f1219]"
-                            delay={0.1}
-                        />
-
-                        <BenefitCard
-                            icon={TrendingUp}
-                            title="Financial ROI"
-                            value={`${formatPrice(valueGeneratedMo, 'SA').value} SAR`}
-                            highlightColor="text-emerald-400"
-                            breakdown={[
-                                `Investment: ${formatPrice(finalTotal / 12, 'SA').value} SAR/mo`, // Simplified amortized logic
-                                `Net Benefit: ${formatPrice(netBenefitMo, 'SA').value} SAR/mo`,
-                                `ROI: 260% (2.6x Return)`
-                            ]}
-                            gradient="bg-gradient-to-br from-emerald-900/40 via-[#0f1219] to-[#0f1219]"
-                            delay={0.2}
-                        />
-
-                        <BenefitCard
-                            icon={Zap}
-                            title="Efficiency Boost"
-                            value="+40% Capacity"
-                            highlightColor="text-purple-400"
-                            breakdown={[
-                                `Optimize ${routesDaily}+ routes daily`,
-                                `Reduce planning time by 80%`,
-                                `Serve ${Math.floor(routesDaily * 0.4)} more customers/day`
-                            ]}
-                            gradient="bg-gradient-to-br from-purple-900/40 via-[#0f1219] to-[#0f1219]"
-                            delay={0.3}
-                        />
-
-                        <BenefitCard
-                            icon={CalendarCheck}
-                            title="Annual Value"
-                            value={`${formatPrice(valueYr, 'SA').value} SAR`}
-                            highlightColor="text-amber-400"
-                            breakdown={[
-                                `12-Month Net Benefit`,
-                                `+${formatPrice(valueYr * 0.1, 'SA').value} SAR Efficiency Gains`, // Mock up-sell
-                                `Breakeven: < 1 Month`
-                            ]}
-                            gradient="bg-gradient-to-br from-amber-900/40 via-[#0f1219] to-[#0f1219]"
-                            delay={0.4}
-                        />
-                    </div>
-
-                    <div className="bg-gradient-to-r from-[#1e2433] to-[#0f1219] p-6 rounded-3xl border border-white/5 mt-auto relative overflow-hidden group">
-                        <div className="absolute top-0 right-0 w-64 h-64 bg-cyan-500/5 blur-[80px] rounded-full pointer-events-none" />
-
-                        <div className="relative z-10 flex flex-col md:flex-row items-center gap-6">
-                            <div className="flex-1">
-                                <p className="text-white font-bold text-sm mb-1">"We recovered our investment in the first month using Reach."</p>
-                                <p className="text-xs text-slate-500">Based on actual data from 200+ logistics partners in KSA.</p>
-                                <div className="flex gap-4 mt-4">
-                                    <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-bold uppercase tracking-wider bg-black/20 px-3 py-1.5 rounded-lg border border-white/5">
-                                        <ShieldCheck className="w-3 h-3 text-emerald-500" /> SSL Secure
-                                    </div>
-                                    <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-bold uppercase tracking-wider bg-black/20 px-3 py-1.5 rounded-lg border border-white/5">
-                                        <CheckCircle className="w-3 h-3 text-cyan-500" /> Cancel Anytime
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="flex flex-col gap-3 w-full md:w-auto min-w-[260px]">
-                                <button
-                                    onClick={onSubmit}
-                                    disabled={isLoading}
-                                    className="w-full px-8 py-4 bg-gradient-to-r from-brand-primary to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white rounded-2xl font-black text-lg shadow-xl shadow-cyan-500/20 hover:shadow-cyan-500/40 hover:-translate-y-1 transition-all active:scale-[0.98] flex items-center justify-center gap-2 whitespace-nowrap group"
-                                >
-                                    {isLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : <><RocketIcon className="w-5 h-5 group-hover:-translate-y-1 transition-transform" /> Launch Workspace</>}
-                                </button>
-                                <button
-                                    onClick={onContactSales}
-                                    className="w-full py-3 bg-white/5 border border-white/10 hover:bg-white/10 text-slate-400 hover:text-white rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2"
-                                >
-                                    Need 100+ Licenses? Contact Sales
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
             </div>
         </motion.div>
     );
 };
 
-// Icon helpers (if they don't exist in imports, we should add them or map them)
-// We need to ensure we have: Calendar as CalendarIcon, Clock as ClockIcon, Tag, Rocket as RocketIcon, CalendarCheck
-// Updating imports at the top of file is risky with replace, so I'll try to reuse existing or cast.
-const ClockIcon = (props: any) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>;
+// Icon helpers
 const RocketIcon = (props: any) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z" /><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z" /><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0" /><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5" /></svg>;
 const CalendarIcon = (props: any) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><rect width="18" height="18" x="3" y="4" rx="2" ry="2" /><line x1="16" x2="16" y1="2" y2="6" /><line x1="8" x2="8" y1="2" y2="6" /><line x1="3" x2="21" y1="10" y2="10" /></svg>;
-const CalendarCheck = (props: any) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M8 2v4" /><path d="M16 2v4" /><rect width="18" height="18" x="3" y="4" rx="2" /><path d="M3 10h18" /><path d="m9 16 2 2 4-4" /></svg>;
 const Tag = (props: any) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l5 5a2 2 0 0 0 2.828 0l7.172-7.172a2 2 0 0 0 0-2.828l-5-5z" /><circle cx="7.5" cy="7.5" r=".5" fill="currentColor" /></svg>;
 
 export default TenantSetupModal;

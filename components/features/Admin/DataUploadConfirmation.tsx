@@ -71,7 +71,13 @@ const TableSection: React.FC<TableSectionProps> = ({
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
-                                onAutoDetect(tableName === 'normalized_customers' ? 'customers' : tableName === 'route_visits' ? 'visits' : tableName);
+                                // Map display table names back to internal keys for auto-detect
+                                let internalKey = tableName;
+                                if (tableName === 'normalized_customers') internalKey = 'customers';
+                                else if (tableName === 'route_visits') internalKey = 'visits';
+                                else if (tableName === 'company_branches') internalKey = 'branches';
+
+                                onAutoDetect(internalKey);
                             }}
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700/50 hover:bg-slate-600/50 text-slate-300 hover:text-white rounded-lg transition-colors border border-slate-600/50 text-xs font-medium z-10"
                             title="Auto-detect columns for this table"
@@ -295,7 +301,7 @@ const DataUploadConfirmation: React.FC<DataUploadConfirmationProps> = ({
                 sampleRows: routeValues.slice(0, 3).map(r => ({
                     route_name: r.name,
                     rep_code: r.repCode,
-                    branch_id: `${r.branchCode} - ${r.branch} ` // Show "Code - Name"
+                    branch_id: r.branchCode
                 }))
             },
             customers: {
@@ -304,7 +310,7 @@ const DataUploadConfirmation: React.FC<DataUploadConfirmationProps> = ({
                     client_code: c.clientCode || '',
                     name_en: c.name || '',
                     name_ar: c.nameAr || '',
-                    region_code: c.regionCode || '', // Map region_code to c.regionCode (e.g. "21")
+                    branch_code: c.regionCode || '', // Map region_code to c.regionCode (e.g. "21")
                     lat: c.lat,
                     lng: c.lng,
                     address: c.address || '',
@@ -345,14 +351,14 @@ const DataUploadConfirmation: React.FC<DataUploadConfirmationProps> = ({
                 return [
                     { name: 'route_name', mapped: !!m.route_name, csvHeader: m.route_name, mappingKey: 'route_name' },
                     { name: 'rep_code', mapped: !!m.rep_code, csvHeader: m.rep_code, mappingKey: 'rep_code' },
-                    { name: 'branch_id', mapped: !!m.branch_code, csvHeader: 'Linked via branch_code' },
+                    { name: 'branch_id', mapped: !!m.branch_code, csvHeader: m.branch_code, mappingKey: 'branch_code' }, // branch_id in routes is derived from branch_code/region
                 ];
             case 'customers':
                 return [
                     { name: 'client_code', mapped: !!m.client_code, csvHeader: m.client_code, mappingKey: 'client_code' },
                     { name: 'name_en', mapped: !!m.customer_name_en, csvHeader: m.customer_name_en, mappingKey: 'customer_name_en' },
                     { name: 'name_ar', mapped: !!m.customer_name_ar, csvHeader: m.customer_name_ar, mappingKey: 'customer_name_ar' },
-                    { name: 'region_code', mapped: !!m.branch_code, csvHeader: m.branch_code, mappingKey: 'branch_code' }, // Allow changing branch code here
+                    { name: 'branch_code', mapped: !!m.branch_code, csvHeader: m.branch_code, mappingKey: 'branch_code' }, // Allow changing branch code here
                     { name: 'lat', mapped: !!m.lat, csvHeader: m.lat, mappingKey: 'lat' },
                     { name: 'lng', mapped: !!m.lng, csvHeader: m.lng, mappingKey: 'lng' },
                     { name: 'address', mapped: !!m.address, csvHeader: m.address, mappingKey: 'address' },
@@ -428,7 +434,7 @@ const DataUploadConfirmation: React.FC<DataUploadConfirmationProps> = ({
                         icon={<Building2 className="w-5 h-5 text-white" />}
                         color="purple"
                         count={tableStats.branches.count}
-                        tableName="branches"
+                        tableName="company_branches"
                         columns={getColumnMappings('branches')}
                         sampleRows={tableStats.branches.sampleRows}
                         isExpanded={expandedSections.branches}
@@ -438,6 +444,7 @@ const DataUploadConfirmation: React.FC<DataUploadConfirmationProps> = ({
                         onAutoDetect={onAutoDetect}
                         firstRawRow={firstRawRow}
                     />
+
 
                     {/* ROUTES */}
                     <TableSection
