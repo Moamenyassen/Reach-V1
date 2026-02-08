@@ -207,7 +207,42 @@ interface InsightsDashboardProps {
   onOpenCompanySettings?: () => void;
 }
 
-const InsightsDashboard: React.FC<InsightsDashboardProps> = (props) => {
+// --- Error Boundary ---
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: Error | null }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("Insights Crash:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-8 text-center">
+          <h2 className="text-xl font-bold text-red-500 mb-2">Something went wrong in Insights</h2>
+          <p className="text-slate-400 mb-4">{this.state.error?.message}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500/20"
+          >
+            Reload Page
+          </button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+const InsightsDashboardContent: React.FC<InsightsDashboardProps> = (props) => {
   const { hideHeader, currentCompany, currentUser } = props;
 
   // NEW: Check if user is admin/manager (can see all data)
@@ -238,7 +273,8 @@ const InsightsDashboard: React.FC<InsightsDashboardProps> = (props) => {
       if (!currentCompany?.id) return [];
       return await getBranches(currentCompany.id);
     },
-    enabled: !!currentCompany?.id
+    enabled: !!currentCompany?.id,
+    staleTime: 1000 * 60 * 5, // Cache branches for 5 mins
   });
 
   const activeBranches = React.useMemo(() => {
@@ -265,19 +301,43 @@ const InsightsDashboard: React.FC<InsightsDashboardProps> = (props) => {
   }, [dbBranches, isAdmin, userBranchIds]);
 
   // --- Server-Side Stats Fetching ---
-  // NEW: Include userBranchIds in query key and pass to RPC for filtering
-  const { data: summary, isLoading: isCalculating } = useQuery({
+  // PERFORMANCE FIX: 
+  // 1. gcTime: 0 -> Clears cache/memory immediately on unmount
+  // 2. retry: 3 -> Handles network glitches automatically
+  // 3. signal -> Cancels pending request if user navigates away
+  const {
+    data: summary,
+    isLoading: isCalculating,
+    refetch: refreshInsights,
+    isRefetching,
+    isError,
+    error: queryError
+  } = useQuery({
     queryKey: ['dashboardInsights', currentCompany?.id, isAdmin ? 'all' : userBranchIds.join(',')],
-    queryFn: async () => {
-      if (!currentCompany?.id) return null;
+    queryFn: async ({ signal }) => {
+      if (!currentCompany?.id) throw new Error("No Company ID");
       // Pass branchIds for restricted users
       const branchFilter = !isAdmin && userBranchIds.length > 0 ? userBranchIds : undefined;
       console.log('[Insights] Fetching stats with branchFilter:', branchFilter);
-      return await getDashboardInsights(currentCompany.id, branchFilter);
+      return await getDashboardInsights(currentCompany.id, branchFilter, signal);
     },
     enabled: !!currentCompany?.id,
-    staleTime: 0 // Fetch every time to ensure fresh data during debugging
+    retry: 1, // Reduced retry for debugging
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
+    staleTime: 0, // Always fetch fresh data on mount
+    gcTime: 0,    // Clear memory immediately when component unmounts (requires @tanstack/react-query v5)
+    refetchOnWindowFocus: false,
   });
+
+  if (isError) {
+    return (
+      <div className="p-8 text-center text-red-500">
+        <h3 className="font-bold">Error Loading Data</h3>
+        <p className="text-sm opacity-70 mb-4">{queryError?.message}</p>
+        <button onClick={() => refreshInsights()} className="px-4 py-2 bg-white/10 rounded">Retry</button>
+      </div>
+    );
+  }
 
   console.log('Insights Debug:', {
     companyId: currentCompany?.id,
@@ -287,6 +347,8 @@ const InsightsDashboard: React.FC<InsightsDashboardProps> = (props) => {
     firstBranchCoords: activeBranches[0]?.coordinates
   });
 
+  // Safe extraction of alerts to prevent crashes
+  const alerts = summary?.alerts || { missingGps: 0, proximityIssues: 0 };
 
   const formatNum = (n: number) => n?.toLocaleString() || '0';
 
@@ -356,6 +418,17 @@ const InsightsDashboard: React.FC<InsightsDashboardProps> = (props) => {
               <Activity className="w-3.5 h-3.5 text-white" />
             </div>
             <h1 className="text-sm font-black tracking-tight text-main uppercase">Operations <span className="text-brand-primary">Insights</span></h1>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => refreshInsights()}
+              disabled={isCalculating || isRefetching}
+              className={`p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 transition-colors ${isCalculating || isRefetching ? 'opacity-50 cursor-not-allowed' : ''}`}
+              title="Refresh Data"
+            >
+              <Repeat className={`w-4 h-4 text-slate-400 ${isCalculating || isRefetching ? 'animate-spin' : ''}`} />
+            </button>
           </div>
 
         </header>
@@ -450,27 +523,27 @@ const InsightsDashboard: React.FC<InsightsDashboardProps> = (props) => {
               </div>
 
               <div className="flex flex-col gap-2">
-                {((summary?.alerts.missingGps || 0) === 0 && (summary?.alerts.proximityIssues || 0) === 0) ? (
+                {((alerts.missingGps || 0) === 0 && (alerts.proximityIssues || 0) === 0) ? (
                   <div className="p-4 rounded-lg border border-emerald-500/20 bg-emerald-500/5 flex items-center gap-3">
                     <div className="p-1 rounded-full bg-emerald-500/20"><Activity className="w-4 h-4 text-emerald-500" /></div>
                     <span className="text-[10px] text-emerald-400 font-medium">No critical alerts detected.</span>
                   </div>
                 ) : (
                   <>
-                    {summary?.alerts.missingGps > 0 && (
+                    {alerts.missingGps > 0 && (
                       <RedFlagCard
                         title="Missing GPS"
-                        value={formatNum(summary?.alerts.missingGps || 0)}
+                        value={formatNum(alerts.missingGps || 0)}
                         icon={AlertOctagon}
                         type="critical"
                         size="compact"
                         tooltip="Vehicles with no GPS signal"
                       />
                     )}
-                    {summary?.alerts.proximityIssues > 0 && (
+                    {alerts.proximityIssues > 0 && (
                       <RedFlagCard
                         title="Proximity Issues"
-                        value={formatNum(summary?.alerts.proximityIssues || 0)}
+                        value={formatNum(alerts.proximityIssues || 0)}
                         icon={Target}
                         type="warning"
                         size="compact"
@@ -489,5 +562,11 @@ const InsightsDashboard: React.FC<InsightsDashboardProps> = (props) => {
     </div>
   );
 };
+
+const InsightsDashboard = (props: InsightsDashboardProps) => (
+  <ErrorBoundary>
+    <InsightsDashboardContent {...props} />
+  </ErrorBoundary>
+);
 
 export default InsightsDashboard;

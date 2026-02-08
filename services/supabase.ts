@@ -3884,18 +3884,23 @@ export const fetchRouteHealth = async (companyId: string, filters?: any) => {
 // --- Dashboard Insights (Server-Side Calculation) ---
 export const getDashboardInsights = async (
     companyId: string,
-    branchIds?: string[]  // NEW: For restricted user filtering
+    branchIds?: string[], // NEW: For restricted user filtering
+    signal?: AbortSignal // NEW: For request cancellation
 ): Promise<DashboardInsights | null> => {
     try {
         console.log('[Dashboard] Fetching stats for company:', companyId, 'branchIds:', branchIds);
 
         // Use the new optimized RPC function that queries company_uploaded_data directly
-        const { data, error } = await supabase.rpc('get_dashboard_stats_from_upload', {
+        let query = supabase.rpc('get_dashboard_stats_from_upload', {
             p_company_id: companyId,
             p_branch_ids: branchIds && branchIds.length > 0 ? branchIds : null
         });
 
-        console.log('[Dashboard] RPC Response:', { data, error });
+        if (signal) {
+            query = query.abortSignal(signal);
+        }
+
+        const { data, error } = await query;
 
         if (error) {
             console.error('Error fetching dashboard insights via RPC:', error);
