@@ -90,12 +90,11 @@ export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
   }
 };
 
-export const SAMPLE_CSV = `Route_name,Client_code,client_descreption,Client_Arabic,longitude,latitude,Day,Region_Code
-SHEHAB HEJAZI (22999299),22201019000,RAWDAT ALKHEER GROCERY,بقالة روضة الخير,39.84822845,21.43411064,Thursday,22
-SHEHAB HEJAZI (22999299),22201027000,ALTAWFEER BAKERY AND CENTER,مركز ومخبز التوفير,39.84883118,21.43395996,Thursday,22
-SHEHAB HEJAZI (22999299),22201087000,ARAFAT GROCERY,بقالة عرفات,39.90512848,21.47208023,Thursday,22
-SHEHAB HEJAZI (22999299),22201112000,ALBIDAYAH GROCERY,بقالة البداية,39.84642029,21.45358086,Thursday,22
-SHEHAB HEJAZI (22999299),22201560000,ALMARWA GRO,بقالة المروة,39.53395081,21.44140053,Wednesday,22`;
+export const SAMPLE_CSV = `Route_name,User_Code,Branch_Code,Branch_Name,Region,Client_code,client_description,Client_Arabic,longitude,latitude,Address,Phone,Week_Number,Day,Visit_Order,District,VAT_Number,Buyer_ID,Classification,Store_Type
+Route A (101),101,10,Central Branch,Central,10001,Sunny Supermarket,سوبرماركت مشمس,46.6753,24.7136,Main Street,0500000001,W1,Sunday,1,Downtown,300000000000001,1000000001,A,Supermarket
+Route A (101),101,10,Central Branch,Central,10002,Quick Stop Grocery,بقالة التوقف السريع,46.6800,24.7200,Side Street,0500000002,W1,Sunday,2,Downtown,300000000000002,1000000002,B,Grocery
+Route B (102),102,10,Central Branch,Central,20001,Family Market,سوق العائلة,46.6900,24.7300,Market Road,0500000003,W1,Monday,1,Uptown,300000000000003,1000000003,A,Minimarket
+Route B (102),102,10,Central Branch,Central,20002,Corner Shop,متجر الزاوية,46.7000,24.7400,Park Avenue,0500000004,W1,Monday,2,Uptown,300000000000004,1000000004,C,Grocery`;
 
 export const MAP_LAYERS = {
   VOYAGER: {

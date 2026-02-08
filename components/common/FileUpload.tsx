@@ -99,11 +99,12 @@ const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded, maxRouteCap, maxC
       address: findColumnKey(firstRow, ['Address', 'address', 'location_address', 'location', 'site'], customMapping, 'address'),
       phone: findColumnKey(firstRow, ['phone', 'Phone', 'mobile', 'contact', 'cell'], customMapping, 'phone'),
       district: findColumnKey(firstRow, ['district', 'District', 'neighborhood', 'area'], customMapping, 'district'),
-      vat: findColumnKey(firstRow, ['vat', 'VAT', 'vat_number', 'tax', 'tax_id', 'vat_no', 'tax_number'], customMapping, 'vat'),
-      buyerId: findColumnKey(firstRow, ['buyer_identification_no', 'buyer_id', 'buyer_no', 'buyer'], customMapping, 'buyerId'),
+      vat: findColumnKey(firstRow, ['vat', 'VAT', 'VAT_Number', 'vat_number', 'tax', 'tax_id', 'vat_no', 'tax_number'], customMapping, 'vat'),
+      buyerId: findColumnKey(firstRow, ['buyer_identification_no', 'Buyer_ID', 'buyer_id', 'buyer_no', 'buyer'], customMapping, 'buyerId'),
       classification: findColumnKey(firstRow, ['Classification', 'classification', 'class', 'category'], customMapping, 'classification'),
-      storeType: findColumnKey(firstRow, ['store_type', 'Store_type', 'type', 'channel'], customMapping, 'storeType'),
+      storeType: findColumnKey(firstRow, ['store_type', 'Store_type', 'Store_Type', 'type', 'channel'], customMapping, 'storeType'),
       userCode: findColumnKey(firstRow, ['User_Code', 'user_code', 'User_id', 'sales_rep_id', 'sales_man_id', 'driver_id', 'rep_code', 'driver'], customMapping, 'userCode'),
+      visitOrder: findColumnKey(firstRow, ['Visit_Order', 'visit_order', 'order', 'sequence', 'stop_number'], customMapping, 'visitOrder'),
     };
   };
 
@@ -140,7 +141,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded, maxRouteCap, maxC
         routeName: routeKey, day: dayKey, regionDescription: regionDescKey, regionCode: regionCodeKey,
         week: weekKey, branch: branchKey, address: addressKey, phone: phoneKey, district: districtKey,
         vat: vatKey, buyerId: buyerIdKey, classification: classificationKey, storeType: storeTypeKey,
-        userCode: userCodeKey
+        userCode: userCodeKey, visitOrder: visitOrderKey
       } = detected;
 
       // 2. Identify Unique Entities (Distinct Counting Logic)
@@ -419,6 +420,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded, maxRouteCap, maxC
           classification: classificationKey ? String(row[classificationKey] || '').trim() : undefined,
           storeType: storeTypeKey ? String(row[storeTypeKey] || '').trim() : undefined,
           userCode: userCode ? String(userCode).trim() : undefined,
+          visitOrder: visitOrderKey && row[visitOrderKey] ? parseInt(String(row[visitOrderKey])) : undefined,
           reachCustomerCode: undefined, // Removed as per user request
           data: dynamicData // Capture all unmapped columns
         });
@@ -624,7 +626,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded, maxRouteCap, maxC
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'route_template.csv';
+    a.download = 'Reach_Data_Import_Template.csv';
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -632,7 +634,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded, maxRouteCap, maxC
   return (
     <div className="max-w-2xl mx-auto relative group/container">
       {/* Glow Effect */}
-      <div className="absolute -inset-1 bg-gradient-to-r from-cyan-500 to-violet-600 rounded-[2.5rem] blur opacity-20 group-hover/container:opacity-40 transition duration-1000 group-hover/container:duration-200"></div>
+      <div className="absolute -inset-1 bg-gradient-to-r from-cyan-500 to-violet-600 rounded-[2.5rem] blur opacity-20 group-hover/container:opacity-40 transition duration-1000 group-hover/container:duration-200 pointer-events-none"></div>
 
       <div
         className={`relative bg-white dark:bg-gray-900 border-2 rounded-[2.5rem] p-12 text-center transition-all duration-500 cursor-pointer overflow-hidden ${isDragOver
@@ -710,7 +712,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded, maxRouteCap, maxC
       <div className="mt-8 flex justify-center">
         <button
           onClick={(e) => { e.stopPropagation(); downloadTemplate(); }}
-          className="group flex items-center gap-2 text-sm font-bold text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors px-6 py-3 rounded-2xl hover:bg-white dark:hover:bg-gray-800 border border-transparent hover:border-gray-200 dark:hover:border-gray-700"
+          className="relative z-20 group flex items-center gap-2 text-sm font-bold text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors px-6 py-3 rounded-2xl hover:bg-white dark:hover:bg-gray-800 border border-transparent hover:border-gray-200 dark:hover:border-gray-700"
         >
           <FileSpreadsheet className="w-4 h-4 transition-transform group-hover:-translate-y-1" />
           Download CSV Template
