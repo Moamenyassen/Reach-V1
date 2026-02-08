@@ -11,11 +11,14 @@ interface AIOptimizerProps {
     onToggleTheme: () => void;
     onToggleLang: () => void;
     hideHeader?: boolean;
+    companyId?: string;
+    userBranchIds?: string[];
+    userRole?: string;
 }
 
-const AIOptimizer: React.FC<AIOptimizerProps> = ({ onBack }) => {
+const AIOptimizer: React.FC<AIOptimizerProps> = ({ onBack, companyId, userBranchIds, userRole }) => {
     return (
-        <OptimizerLayout onBack={onBack} />
+        <OptimizerLayout onBack={onBack} companyId={companyId} userBranchIds={userBranchIds} userRole={userRole} />
     );
 };
 

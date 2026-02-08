@@ -25,6 +25,10 @@ export interface OptimizationSuggestion {
     reason: string;
     latitude: number;
     longitude: number;
+    currentRouteAvgDist: number;
+    newRouteAvgDist: number;
+    neighborsSample: [number, number][]; // [lat, lng]
+    targetRoutePath: [number, number][]; // Ordered path for the target day
 }
 
 export interface OptimizationResult {
@@ -55,9 +59,22 @@ function toRad(degrees: number) {
     return degrees * (Math.PI / 180);
 }
 
-export const fetchOptimizationSuggestions = async (filters: { branch_code?: string; week?: string; routes?: string[] } = {}): Promise<OptimizationResult> => {
+export const fetchOptimizationSuggestions = async (
+    companyId: string,
+    filters: { branch_code?: string; week?: string; routes?: string[] } = {},
+    allowedBranches?: string[]
+): Promise<OptimizationResult> => {
     try {
         console.log('Fetching customers for optimization...');
+        console.log('Filters:', filters);
+
+        // DEBUG: Check distinct route names in the data to compare with filter
+        const debugRoutes = await supabase.from('company_uploaded_data').select('route_name').eq('company_id', companyId).limit(20);
+        console.log('Sample Data Routes:', debugRoutes.data?.map(d => d.route_name));
+
+        // Build query
+
+        // Build query
 
         // Build query
         let query = supabase
@@ -70,7 +87,13 @@ export const fetchOptimizationSuggestions = async (filters: { branch_code?: stri
             .not('week_number', 'is', null)
             .not('day_name', 'is', null)
             .not('branch_code', 'is', null)
+            .not('branch_code', 'is', null)
+            .eq('company_id', companyId)
             .limit(50000);
+
+        if (allowedBranches && allowedBranches.length > 0) {
+            query = query.in('branch_code', allowedBranches);
+        }
 
         if (filters.branch_code && filters.branch_code !== 'All Branches') query = query.eq('branch_code', filters.branch_code);
         if (filters.week && filters.week !== 'All Weeks') query = query.eq('week_number', filters.week);
@@ -108,7 +131,12 @@ export const fetchOptimizationSuggestions = async (filters: { branch_code?: stri
         const distinctRoutes = Array.from(rawRoutes).sort();
 
         // Use 'any' to bypass strict type check for now
-        const rawCustomers: any[] = customers;
+        const rawCustomers: any[] = customers.filter((c: any) => {
+            const lat = parseFloat(c.lat);
+            const lng = parseFloat(c.lng);
+            // STRICT VALIDATION: Exclude 0,0 and invalid numbers
+            return !isNaN(lat) && !isNaN(lng) && Math.abs(lat) > 0.0001 && Math.abs(lng) > 0.0001;
+        });
 
         // STEP 2: Group by rep_code and day_name
         const routeGroups: Record<string, any[]> = {};
@@ -128,6 +156,7 @@ export const fetchOptimizationSuggestions = async (filters: { branch_code?: stri
                 _user: userCode,
                 _day: day,
                 _week: week,
+                _order: customer.visit_order || 999, // Store visit order
                 _branch: customer.branch_code
             });
         });
@@ -154,8 +183,8 @@ export const fetchOptimizationSuggestions = async (filters: { branch_code?: stri
                 const cRoute = customer.route_name;
                 const cDistrict = customer.district;
 
+                // Redundant check but safe
                 if (isNaN(cLat) || isNaN(cLng)) return;
-                // Strict check for 0,0 or null-like coordinates
                 if (Math.abs(cLat) < 0.0001 && Math.abs(cLng) < 0.0001) return;
 
                 // Check other routes on same day (USER SWAP)
@@ -205,9 +234,14 @@ export const fetchOptimizationSuggestions = async (filters: { branch_code?: stri
 
                     const distSaved = avgDistCurrent - avgDistOther;
 
-                    if (distSaved > 5) {
+                    if (distSaved > 15) { // INCREASED THRESHOLD: Only strictly better changes (> 15km)
                         const timeSaved = Math.round(calculateTime(distSaved, { isUrban: true }));
-                        const impactScore = Math.min(100, Math.round((distSaved / avgDistCurrent) * 100));
+                        const percentImprovement = (distSaved / avgDistCurrent) * 100;
+
+                        // SMART FILTER: Only suggest if improvement is significant (> 20%)
+                        if (percentImprovement < 20) return;
+
+                        const impactScore = Math.min(100, Math.round(percentImprovement));
 
                         allSuggestions.push({
                             id: `opt_${suggestionId++}`,
@@ -232,7 +266,17 @@ export const fetchOptimizationSuggestions = async (filters: { branch_code?: stri
                             confidence: Math.min(95, 70 + Math.round(distSaved)),
                             reason: `Customer in ${cDistrict || 'district'} is ${Math.round(distSaved)}km closer to ${otherUser}'s route based in ${cBranch}.`,
                             latitude: cLat,
-                            longitude: cLng
+                            longitude: cLng,
+                            currentRouteAvgDist: Math.round(avgDistCurrent * 10) / 10,
+                            newRouteAvgDist: Math.round(avgDistOther * 10) / 10,
+                            neighborsSample: otherRouteCustomers
+                                .slice(0, 5) // Take top 5 neighbors
+                                .map(n => [parseFloat(n.lat), parseFloat(n.lng)] as [number, number])
+                                .filter(p => !isNaN(p[0]) && !isNaN(p[1])),
+                            targetRoutePath: otherRouteCustomers
+                                .sort((a, b) => (a._order || 0) - (b._order || 0)) // Sort by visit sequence
+                                .map(n => [parseFloat(n.lat), parseFloat(n.lng)] as [number, number])
+                                .filter(p => !isNaN(p[0]) && !isNaN(p[1]))
                         });
                     }
                 });
@@ -309,7 +353,17 @@ export const fetchOptimizationSuggestions = async (filters: { branch_code?: stri
                             confidence: Math.min(95, 70 + Math.round(distSaved)),
                             reason: `Customer in ${cDistrict || 'district'} creates backtracking on ${day}. Fits better on ${otherDay}.`,
                             latitude: cLat,
-                            longitude: cLng
+                            longitude: cLng,
+                            currentRouteAvgDist: Math.round(avgDistCurrent * 10) / 10,
+                            newRouteAvgDist: Math.round(avgDistOther * 10) / 10,
+                            neighborsSample: otherDayCustomers
+                                .slice(0, 5)
+                                .map(n => [parseFloat(n.lat), parseFloat(n.lng)] as [number, number])
+                                .filter(p => !isNaN(p[0]) && !isNaN(p[1])),
+                            targetRoutePath: otherDayCustomers
+                                .sort((a, b) => (a._order || 0) - (b._order || 0))
+                                .map(n => [parseFloat(n.lat), parseFloat(n.lng)] as [number, number])
+                                .filter(p => !isNaN(p[0]) && !isNaN(p[1]))
                         });
                     }
                 });
@@ -330,7 +384,7 @@ export const fetchOptimizationSuggestions = async (filters: { branch_code?: stri
             }
         });
 
-        const topSuggestions = distinctSuggestions.slice(0, 50);
+        const topSuggestions = distinctSuggestions.slice(0, 20); // Focus on top 20 high-impact changes
 
         const totalDistance = topSuggestions.reduce((sum, s) => sum + s.distanceSaved, 0);
         const totalTime = topSuggestions.reduce((sum, s) => sum + s.timeSaved, 0);
@@ -363,40 +417,77 @@ export const fetchOptimizationSuggestions = async (filters: { branch_code?: stri
     }
 };
 
-export const fetchOptimizationFilters = async () => {
+// Refactored to sequential fetching to ensure correct filtering hierarchy
+export const fetchOptimizationFilters = async (
+    companyId: string,
+    allowedBranches?: string[]
+) => {
     try {
-        // Parallel fetch: Branches and Routes
-        const [branchesResponse, routesResponse] = await Promise.all([
-            supabase
-                .from('company_branches')
-                .select('code, name_en')
-                .eq('is_active', true)
-                .order('name_en'),
-            supabase
-                .from('company_uploaded_data')
-                .select('route_name')
-                .not('route_name', 'is', null)
-        ]);
+        // 1. Fetch Branches first
+        let branchesQuery = supabase
+            .from('company_branches')
+            .select('id, code, name_en')
+            .eq('company_id', companyId)
+            .eq('is_active', true)
+            .order('name_en');
 
-        if (branchesResponse.error) throw branchesResponse.error;
-        if (routesResponse.error) console.warn('Error fetching routes:', routesResponse.error);
+        if (allowedBranches && allowedBranches.length > 0) {
+            // userBranchIds are typically Names (e.g. "Riyadh"), so we filter by name_en
+            branchesQuery = branchesQuery.in('name_en', allowedBranches);
+        }
+
+        const { data: branchesData, error: branchError } = await branchesQuery;
+
+        if (branchError) throw branchError;
 
         // Map branches to standard format
-        const branches = (branchesResponse.data || []).map(b => ({
+        const branches = (branchesData || []).map(b => ({
             code: b.code,
             name: b.name_en || b.code
         }));
 
-        // Extract distinct routes
-        const uniqueRoutes = Array.from(new Set((routesResponse.data || []).map((r: any) => r.route_name))).sort();
+        // Get the IDs of the fetched branches for filtering routes
+        const validBranchIds = (branchesData || []).map(b => b.id);
+
+        // 2. Fetch Routes
+        let routesQuery = supabase
+            .from('routes')
+            .select('name, branch:company_branches!inner(code, name_en)')
+            .eq('company_id', companyId)
+            .eq('is_active', true)
+            .order('name');
+
+        if (allowedBranches && allowedBranches.length > 0) {
+            if (validBranchIds.length > 0) {
+                // Filter routes by the actual Branch IDs we found
+                routesQuery = routesQuery.in('branch_id', validBranchIds);
+            } else {
+                // User is restricted but no branches matched? Return empty routes.
+                return { regions: [], branches: [], routes: [], routeDetails: [] };
+            }
+        }
+
+        const { data: routesResponse, error: routesError } = await routesQuery;
+
+        if (routesError) console.warn('Error fetching routes:', routesError);
+
+        // Extract routes with their branches from the system definition
+        const routeData = (routesResponse || []).map((r: any) => ({
+            name: r.name,
+            branch: r.branch?.name_en || 'Unassigned'
+        }));
+
+        // Unique routes just for listing
+        const uniqueRoutes = Array.from(new Set(routeData.map((r: any) => r.name))).sort();
 
         return {
             regions: [],
             branches: branches,
-            routes: uniqueRoutes
+            routes: uniqueRoutes,
+            routeDetails: routeData // Correctly mapped from routes table
         };
     } catch (err) {
         console.error('Error fetching filters:', err);
-        return { regions: [], branches: [], routes: [] };
+        return { regions: [], branches: [], routes: [], routeDetails: [] };
     }
 };
